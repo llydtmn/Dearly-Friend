@@ -57,7 +57,7 @@ export default function LetterContent({ message, onClose, onReply, isStarred = f
           }`}
         >
           <span>{date}</span>
-          <span>Message from: [ {message.senderEmail} ]</span>
+          <span>Message from: {message.senderEmail} </span>
           <div className="flex items-center gap-3">
             {onToggleStar && (
               <button
