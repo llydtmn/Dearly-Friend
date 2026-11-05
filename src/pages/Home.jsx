@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Search, Plus, User, LogOut, Inbox, Users, Star, Clock } from 'lucide-react';
+import { Search, Plus, User, LogOut, Inbox, Users, Star, Clock, Trash2 } from 'lucide-react';
 import {
   getMessages,
   getMessage,
@@ -25,6 +25,7 @@ import ScheduledList from '../components/ScheduledList';
 import ProfilesList from '../components/ProfilesList';
 import ProfileSheet from '../components/ProfileSheet';
 import OfflineBanner from '../components/OfflineBanner';
+import DeletedLetters from '../components/DeletedLetters';
 import { useOutbox } from '../hooks/useOutbox';
 
 const TABS = [
@@ -90,6 +91,7 @@ export default function Home({ user, onSignOut }) {
   const [composeTo, setComposeTo] = useState(null); // a profile to write to
   const [viewProfile, setViewProfile] = useState(null);
   const [showProfile, setShowProfile] = useState(false);
+  const [showDeleted, setShowDeleted] = useState(false);
   const [activeMessage, setActiveMessage] = useState(null);
   const [isEnvelopeOpen, setIsEnvelopeOpen] = useState(false);
   const [swipedId, setSwipedId] = useState(null);
@@ -460,6 +462,14 @@ export default function Home({ user, onSignOut }) {
           <button onClick={openCompose} aria-label="Write a letter" className="hidden md:block text-gray-300 hover:text-paper transition-colors p-2">
             <Plus size={24} />
           </button>
+          <button
+            onClick={() => setShowDeleted(true)}
+            title="Deleted letters"
+            aria-label="Deleted letters"
+            className="text-gray-300 hover:text-paper transition-colors p-2"
+          >
+            <Trash2 size={20} />
+          </button>
           <button onClick={handleSignOut} title="Sign out" className="text-gray-300 hover:text-paper transition-colors p-2">
             <LogOut size={20} />
           </button>
@@ -587,6 +597,17 @@ export default function Home({ user, onSignOut }) {
           to={composeTo}
           onClose={closeCompose}
           onSent={handleMessageSent}
+        />
+      )}
+
+      {showDeleted && (
+        <DeletedLetters
+          myEmail={myEmail}
+          onClose={() => setShowDeleted(false)}
+          onRestored={() => {
+            refreshRef.current();
+            refreshUnreadRef.current();
+          }}
         />
       )}
 

@@ -118,6 +118,26 @@ export const deleteMessage = async (id) => {
   if (error) throw error;
 };
 
+/* ---------- Deleted letters (my removed copies, which I can bring back) ---------- */
+
+export const getDeletedMessages = async (myEmail, limit = 100) => {
+  const { data, error } = await supabase
+    .from('messages')
+    .select('*')
+    .or(
+      `and(sender_email.eq.${myEmail},deleted_by_sender.eq.true),and(recipient_email.eq.${myEmail},deleted_by_recipient.eq.true)`
+    )
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []).map(fromRow);
+};
+
+export const restoreMessage = async (id) => {
+  const { error } = await supabase.rpc('restore_message_for_me', { p_id: id });
+  if (error) throw error;
+};
+
 /* ---------- Keepsakes (private to each person) ---------- */
 
 export const getKeepsakeIds = async () => {
