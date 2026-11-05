@@ -1,0 +1,16 @@
+{
+  "name": "Dearly",
+  "short_name": "Dearly",
+  "description": "A digital letter app for distant friends.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1a1a1a",
+  "theme_color": "#1a1a1a",
+  "icons": [
+    {
+      "src": "/heart.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
