@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Search, Plus, User, LogOut } from 'lucide-react';
+import { Search, Plus, User, LogOut, Inbox, Send, Star, Clock } from 'lucide-react';
 import {
   getMessages,
   getMessage,
@@ -8,6 +8,7 @@ import {
   deleteMessage,
   subscribeToMessages,
   getKeepsakeIds,
+  getUnreadCount,
   addKeepsake,
   removeKeepsake,
   PAGE_SIZE,
@@ -84,6 +85,7 @@ export default function Home({ user, onSignOut }) {
   const [isEnvelopeOpen, setIsEnvelopeOpen] = useState(false);
   const [swipedId, setSwipedId] = useState(null);
   const [scheduledVersion, setScheduledVersion] = useState(0);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   const messagesRef = useRef([]);
   const viewRef = useRef({ filter: 'all', term: '', keepsakeIds });
@@ -153,6 +155,24 @@ export default function Home({ user, onSignOut }) {
     refreshRef.current = refreshFirstPage;
   }, [refreshFirstPage]);
 
+  // Number shown on the Inbox badge (counts the whole inbox, not just the page that's loaded)
+  const refreshUnread = useCallback(async () => {
+    try {
+      setUnreadCount(await getUnreadCount(myEmail));
+    } catch (err) {
+      console.error('Failed to count unread letters:', err);
+    }
+  }, [myEmail]);
+
+  const refreshUnreadRef = useRef(refreshUnread);
+  useEffect(() => {
+    refreshUnreadRef.current = refreshUnread;
+  }, [refreshUnread]);
+
+  useEffect(() => {
+    refreshUnread();
+  }, [refreshUnread]);
+
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), 300);
     return () => clearTimeout(t);
@@ -184,15 +204,20 @@ export default function Home({ user, onSignOut }) {
         if (matchesView(msg, viewRef.current, myEmail)) {
           setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [msg, ...prev]));
         }
-        if (forMe && !mine) toast.info(`A new letter from ${msg.senderEmail} just arrived 💌`);
+        if (forMe && !mine) {
+          toast.info(`A new letter from ${msg.senderEmail} just arrived 💌`);
+          refreshUnreadRef.current();
+        }
       },
       onUpdate: (msg) => {
         setMessages((prev) => prev.map((m) => (m.id === msg.id ? msg : m)));
+        refreshUnreadRef.current();
       },
       onDelete: (id) => {
         if (!id) return;
         setMessages((prev) => prev.filter((m) => m.id !== id));
         setActiveMessage((cur) => (cur?.id === id ? null : cur));
+        refreshUnreadRef.current();
       },
     });
     return unsubscribe;
@@ -202,7 +227,10 @@ export default function Home({ user, onSignOut }) {
   // Catch up on anything missed while the app was in the background (phones suspend sockets)
   useEffect(() => {
     const onVisible = () => {
-      if (document.visibilityState === 'visible') refreshRef.current();
+      if (document.visibilityState === 'visible') {
+        refreshRef.current();
+        refreshUnreadRef.current();
+      }
     };
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('online', onVisible);
@@ -233,6 +261,7 @@ export default function Home({ user, onSignOut }) {
       try {
         await markAsRead(msg.id);
         setMessages((prev) => prev.map((m) => (m.id === msg.id ? { ...m, isRead: true } : m)));
+        setUnreadCount((n) => Math.max(0, n - 1));
       } catch (err) {
         console.error(err);
       }
@@ -268,6 +297,7 @@ export default function Home({ user, onSignOut }) {
       await deleteMessage(id);
       setMessages((prev) => prev.filter((m) => m.id !== id));
       setSwipedId(null);
+      refreshUnread();
     } catch (err) {
       console.error('Failed to delete message:', err);
       toast.error("Couldn't delete this letter. Please try again.");
@@ -362,7 +392,7 @@ export default function Home({ user, onSignOut }) {
           </div>
         </div>
         <div className="flex items-center">
-          <button onClick={openCompose} aria-label="Write a letter" className="text-gray-300 hover:text-paper transition-colors p-2">
+          <button onClick={openCompose} aria-label="Write a letter" className="hidden md:block text-gray-300 hover:text-paper transition-colors p-2">
             <Plus size={24} />
           </button>
           <button onClick={onSignOut} title="Sign out" className="text-gray-300 hover:text-paper transition-colors p-2">
@@ -371,7 +401,7 @@ export default function Home({ user, onSignOut }) {
         </div>
       </div>
 
-      <div className="px-4 py-3 flex gap-5 text-sm font-sans border-b border-gray-800 z-10 bg-charcoal/80 backdrop-blur-md overflow-x-auto whitespace-nowrap">
+      <div className="px-4 py-3 hidden md:flex gap-5 text-sm font-sans border-b border-gray-800 z-10 bg-charcoal/80 backdrop-blur-md overflow-x-auto whitespace-nowrap">
         {TABS.map(([key, label]) => (
           <button
             key={key}
@@ -383,7 +413,27 @@ export default function Home({ user, onSignOut }) {
         ))}
       </div>
 
-      <div className="flex-1 overflow-y-auto z-10 relative">
+      {/* Mobile only: All / Unread switch (the bottom bar replaces the tab row) */}
+      {(filter === 'all' || filter === 'unread') && (
+        <div className="md:hidden px-4 py-2 flex gap-2 text-sm font-sans z-10 bg-charcoal/80 backdrop-blur-md border-b border-gray-800">
+          {[
+            ['all', 'All'],
+            ['unread', unreadCount > 0 ? `Unread (${unreadCount > 99 ? '99+' : unreadCount})` : 'Unread'],
+          ].map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setFilter(key)}
+              className={`px-4 py-1 rounded-full border transition-colors ${
+                filter === key ? 'bg-paper text-charcoal border-paper' : 'border-gray-600 text-gray-400'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="flex-1 overflow-y-auto z-10 relative pb-28 md:pb-0">
         {filter === 'scheduled' ? (
           <ScheduledList key={scheduledVersion} />
         ) : loading && visibleMessages.length === 0 ? (
@@ -429,6 +479,32 @@ export default function Home({ user, onSignOut }) {
         )}
       </div>
 
+      {/* Mobile bottom navigation */}
+      <nav
+        className="md:hidden fixed bottom-0 inset-x-0 z-20 bg-charcoal/95 backdrop-blur-md border-t border-gray-700/50 flex items-end justify-around px-2 pt-2"
+        style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}
+      >
+        <NavBtn
+          label="Inbox"
+          icon={Inbox}
+          badge={unreadCount}
+          active={filter === 'all' || filter === 'unread'}
+          onClick={() => setFilter('all')}
+        />
+        <NavBtn label="Sent" icon={Send} active={filter === 'sent'} onClick={() => setFilter('sent')} />
+
+        <button
+          onClick={openCompose}
+          aria-label="Write a letter"
+          className="-mt-6 w-14 h-14 rounded-full bg-heart text-paper shadow-lg flex items-center justify-center border-4 border-charcoal active:scale-95 transition-transform"
+        >
+          <Plus size={26} />
+        </button>
+
+        <NavBtn label="Keepsakes" icon={Star} active={filter === 'keepsakes'} onClick={() => setFilter('keepsakes')} />
+        <NavBtn label="Scheduled" icon={Clock} active={filter === 'scheduled'} onClick={() => setFilter('scheduled')} />
+      </nav>
+
       {isComposing && (
         <ComposeMessage
           key={replyTo ? `reply-${replyTo.id}` : 'new'}
@@ -470,5 +546,28 @@ export default function Home({ user, onSignOut }) {
           />
         ))}
     </div>
+  );
+}
+
+function NavBtn({ icon: Icon, label, active, onClick, badge = 0 }) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={label}
+      aria-current={active ? 'page' : undefined}
+      className={`flex flex-col items-center gap-0.5 w-16 pb-1 text-[11px] font-sans transition-colors ${
+        active ? 'text-paper' : 'text-gray-500'
+      }`}
+    >
+      <span className="relative">
+        <Icon size={22} />
+        {badge > 0 && (
+          <span className="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full bg-heart text-paper text-[10px] leading-4 text-center">
+            {badge > 99 ? '99+' : badge}
+          </span>
+        )}
+      </span>
+      {label}
+    </button>
   );
 }
