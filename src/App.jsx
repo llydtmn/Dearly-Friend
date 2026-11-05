@@ -5,12 +5,14 @@ import Landing from './components/Landing';
 import Login from './components/Login';
 import Home from './pages/Home';
 import Legal from './pages/Legal';
+import Admin from './pages/Admin';
 import ResetPassword from './components/ResetPassword';
 import StopEmailsPrompt from './components/StopEmailsPrompt';
 
 export default function App() {
   const path = window.location.pathname.replace(/\/+$/, '');
   if (path === '/privacy' || path === '/terms') return <Legal />;
+  if (path === '/admin') return <Admin />; // has its own login panel
   return <AppInner />;
 }
 
