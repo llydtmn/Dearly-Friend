@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Search, Plus, User, LogOut } from 'lucide-react';
-import { getMessages, markAsRead } from '../services/messageService';
+import { getMessages, markAsRead, deleteMessage } from '../services/messageService';
 import MessageCard from '../components/MessageCard';
 import ComposeMessage from '../components/ComposeMessage';
 import EnvelopeScreen from '../components/EnvelopeScreen';
@@ -15,6 +15,7 @@ export default function Home({ user, onSignOut }) {
   const [isComposing, setIsComposing] = useState(false);
   const [activeMessage, setActiveMessage] = useState(null);
   const [isEnvelopeOpen, setIsEnvelopeOpen] = useState(false);
+  const [swipedId, setSwipedId] = useState(null);
 
   const loadMessages = async () => {
     try {
@@ -56,6 +57,17 @@ export default function Home({ user, onSignOut }) {
   const handleCloseLetter = () => {
     setActiveMessage(null);
     setIsEnvelopeOpen(false);
+  };
+
+  const handleDelete = async (id) => {
+    try {
+      await deleteMessage(id);
+      setMessages((prev) => prev.filter((m) => m.id !== id));
+      setSwipedId(null);
+    } catch (err) {
+      console.error('Failed to delete message:', err);
+      alert('Could not delete this message.');
+    }
   };
 
   const handleMessageSent = async () => {
@@ -131,6 +143,10 @@ export default function Home({ user, onSignOut }) {
               currentEmail={myEmail}
               onClick={() => handleMessageClick(msg)}
               isActive={activeMessage?.id === msg.id}
+              isOpen={swipedId === msg.id}
+              onOpen={() => setSwipedId(msg.id)}
+              onClose={() => setSwipedId((cur) => (cur === msg.id ? null : cur))}
+              onDelete={() => handleDelete(msg.id)}
             />
           ))
         )}

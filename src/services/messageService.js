@@ -52,3 +52,15 @@ export const markAsRead = async (id) => {
     .eq('id', id);
   if (error) throw error;
 };
+
+export const deleteMessage = async (id) => {
+  const { data, error } = await supabase
+    .from('messages')
+    .delete()
+    .eq('id', id)
+    .select('id');
+  if (error) throw error;
+  if (!data || data.length === 0) {
+    throw new Error('Delete was blocked. Check the Supabase delete policy.');
+  }
+};

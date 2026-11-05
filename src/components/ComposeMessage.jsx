@@ -55,7 +55,12 @@ export default function ComposeMessage({ user, onClose, onSent }) {
         </div>
 
         <div className="p-6 flex-1 overflow-y-auto text-ink">
-          <RecipientSelector users={friends} selected={recipients} onChange={setRecipients} />
+          <RecipientSelector
+            users={friends}
+            selected={recipients}
+            onChange={setRecipients}
+            currentEmail={user.email.toLowerCase()}
+          />
 
           <div className="space-y-4">
             <input
