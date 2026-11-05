@@ -8,6 +8,7 @@ import Legal from './pages/Legal';
 import Admin from './pages/Admin';
 import ResetPassword from './components/ResetPassword';
 import StopEmailsPrompt from './components/StopEmailsPrompt';
+import { forgetPushOnThisDevice } from './services/pushService';
 
 export default function App() {
   const path = window.location.pathname.replace(/\/+$/, '');
@@ -28,6 +29,12 @@ function AppInner() {
   const invitedEmail = (query.get('email') || '').trim().toLowerCase();
   const [stopOpen, setStopOpen] = useState(!!stopSender);
   const hasLetterLink = query.has('letter') || !!stopSender;
+  const [switchedAccount, setSwitchedAccount] = useState(false);
+
+  // An email link (?letter=…&email=…) was opened in a browser that is signed in as someone else.
+  // That person must not stay signed in here, so sign out and let the intended recipient log in.
+  const sessionEmail = (session?.user?.email || '').toLowerCase();
+  const wrongAccount = !!session && query.has('letter') && !!invitedEmail && sessionEmail !== invitedEmail;
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -46,8 +53,30 @@ function AppInner() {
     return () => subscription.unsubscribe();
   }, []);
 
+  useEffect(() => {
+    if (!wrongAccount) return;
+    let alive = true;
+    (async () => {
+      try {
+        await forgetPushOnThisDevice(); // stop this device receiving the other account's notifications
+      } catch {
+        /* best effort: never block signing out */
+      }
+      // 'local' signs out this browser only, not the other person's phone or other devices
+      await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+      if (alive) {
+        setSwitchedAccount(true);
+        setSession(null);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [wrongAccount]);
+
   if (showSplash) return <SplashScreen onComplete={() => setShowSplash(false)} />;
   if (loading) return null;
+  if (wrongAccount) return null; // never flash another person's inbox while signing out
 
   if (!session) {
     // People arriving from an email link skip the landing page and go straight to login
@@ -57,6 +86,11 @@ function AppInner() {
     return (
       <Login
         initialMode={authMode ?? 'signin'}
+        initialNotice={
+          switchedAccount
+            ? 'We signed out the other account on this browser so you can open your letter. Sign in with the email it was sent to.'
+            : ''
+        }
         onBack={hasLetterLink ? undefined : () => setAuthMode(null)}
       />
     );

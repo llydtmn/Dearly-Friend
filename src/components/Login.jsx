@@ -11,7 +11,7 @@ const linkError = () => {
     : (h.get('error_description') || 'That link did not work.').replace(/\+/g, ' ');
 };
 
-export default function Login({ initialMode = 'signin', onBack }) {
+export default function Login({ initialMode = 'signin', initialNotice = '', onBack }) {
   const params = new URLSearchParams(window.location.search);
   const hasLetter = !!params.get('letter');
   const stopSender = (params.get('stop') || '').trim().toLowerCase();
@@ -23,7 +23,7 @@ export default function Login({ initialMode = 'signin', onBack }) {
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState(linkError);
-  const [notice, setNotice] = useState('');
+  const [notice, setNotice] = useState(initialNotice);
   const [busy, setBusy] = useState(false);
   const [captchaToken, setCaptchaToken] = useState('');
   const [captchaReset, setCaptchaReset] = useState(0);
