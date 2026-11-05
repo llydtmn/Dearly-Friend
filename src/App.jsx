@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { supabase, isRecovering, clearRecovering } from './supabaseClient';
+import { supabase, isRecovering, clearRecovering, getCachedSession } from './supabaseClient';
 import SplashScreen from './components/SplashScreen';
 import Landing from './components/Landing';
 import Login from './components/Login';
@@ -31,12 +31,14 @@ function AppInner() {
     supabase.auth.getSession().then(({ data }) => {
       // the recovery event may have fired before this component mounted: the marker still knows
       if (isRecovering()) setRecovering(true);
-      setSession(data.session);
+      // No connection and the saved login can't be refreshed: still open the app
+      setSession(data.session ?? (navigator.onLine ? null : getCachedSession()));
       setLoading(false);
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, s) => {
       if (event === 'PASSWORD_RECOVERY') setRecovering(true);
       if (event === 'SIGNED_OUT') setRecovering(false);
+      if (!s && event !== 'SIGNED_OUT' && !navigator.onLine) return; // offline hiccup, not a real sign-out
       setSession(s);
     });
     return () => subscription.unsubscribe();

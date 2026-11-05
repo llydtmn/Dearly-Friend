@@ -11,6 +11,7 @@ import {
   uploadVoice,
   removeVoice,
 } from '../services/messageService';
+import { enqueueLetter, isNetworkError } from '../services/outboxService';
 import { compressImage } from '../utils/image';
 import { useToast } from './Toast';
 
@@ -250,6 +251,31 @@ export default function ComposeMessage({ user, profile = null, replyTo = null, t
 
   /* ---------- Send / schedule ---------- */
 
+  const offline = typeof navigator !== 'undefined' && !navigator.onLine;
+
+  // No connection: keep the whole letter on this device. It goes out by itself when we're back online.
+  const queueForLater = async () => {
+    setStage('Saving your letter...');
+    const blobs = await Promise.all(photos.map((p) => compressImage(p.file, { maxSize: 1600, quality: 0.82 })));
+    await enqueueLetter({
+      user,
+      recipients,
+      greeting,
+      content,
+      signature,
+      photos: blobs,
+      voice,
+      schedule: scheduleOn ? { deliverAt: new Date(deliverAt).toISOString(), occasion: occasion.trim() || null, repeatYearly } : null,
+    });
+    sentRef.current = true;
+    try {
+      localStorage.removeItem(draftKey);
+    } catch {
+      /* ignore */
+    }
+    onSent(recipients.length, { queued: true });
+  };
+
   const handleSend = async () => {
     if (!canSend) return;
     setSending(true);
@@ -257,6 +283,10 @@ export default function ComposeMessage({ user, profile = null, replyTo = null, t
     let paths = [];
     let voicePath = null;
     try {
+      if (!navigator.onLine) {
+        await queueForLater();
+        return;
+      }
       if (photos.length) {
         const blobs = await Promise.all(photos.map((p) => compressImage(p.file, { maxSize: 1600, quality: 0.82 })));
         paths = await uploadAttachments(user.id, blobs);
@@ -320,6 +350,15 @@ export default function ComposeMessage({ user, profile = null, replyTo = null, t
       setConfirming(false);
       setSending(false);
     } catch (err) {
+      // The connection dropped mid-send: save it for later instead of losing it
+      if (isNetworkError(err)) {
+        try {
+          await queueForLater();
+          return;
+        } catch (queueErr) {
+          console.error('Could not queue the letter:', queueErr);
+        }
+      }
       console.error('Failed to send letter:', err);
       toast.error(
         `Your letter wasn't ${scheduleOn ? 'scheduled' : 'sent'}: ${err.message || 'something went wrong'}. Your draft is safe.`
@@ -501,6 +540,11 @@ export default function ComposeMessage({ user, profile = null, replyTo = null, t
                 </p>
               )}
               {voice && <p className="text-sm mb-2">Includes a voice message.</p>}
+              {offline && (
+                <p className="text-sm mb-2 text-heart">
+                  You're offline. Your letter will be saved on this device and sent automatically when you're back online.
+                </p>
+              )}
               <p className="text-xs text-ink/60 mb-5">
                 Double-check the spelling. A private letter can't be unsent once it's delivered.
               </p>
@@ -520,7 +564,7 @@ export default function ComposeMessage({ user, profile = null, replyTo = null, t
                   disabled={sending}
                   className="bg-heart text-paper px-5 py-2 rounded-sm text-sm tracking-wide hover:bg-red-900 transition-colors disabled:opacity-50"
                 >
-                  {sending ? stage || (scheduleOn ? 'Scheduling...' : 'Sending...') : `Yes, ${noun}`}
+                  {sending ? stage || (scheduleOn ? 'Scheduling...' : 'Sending...') : offline ? 'Yes, save & send later' : `Yes, ${noun}`}
                 </button>
               </div>
             </div>

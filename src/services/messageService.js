@@ -52,16 +52,35 @@ export const getMessage = async (id) => {
   return data ? fromRow(data) : null;
 };
 
+const PROFILES_CACHE = 'dearly_profiles_cache';
+
 export const getProfiles = async () => {
-  const { data, error } = await supabase.from('profiles').select('id, email, name, avatar_path, bio');
-  if (error) throw error;
-  return data ?? [];
+  try {
+    const { data, error } = await supabase.from('profiles').select('id, email, name, avatar_path, bio');
+    if (error) throw error;
+    try {
+      localStorage.setItem(PROFILES_CACHE, JSON.stringify(data ?? []));
+    } catch {
+      /* cache is best-effort */
+    }
+    return data ?? [];
+  } catch (err) {
+    // Offline: fall back to the last list we saw so the "To:" picker still works
+    try {
+      const cached = JSON.parse(localStorage.getItem(PROFILES_CACHE) || 'null');
+      if (Array.isArray(cached)) return cached;
+    } catch {
+      /* ignore */
+    }
+    throw err;
+  }
 };
 
 export const sendMessage = async (m) => {
   const { data, error } = await supabase
     .from('messages')
     .insert([{
+      ...(m.id ? { id: m.id } : {}), // queued letters carry their own id so a retry can't double-send
       sender_id: m.senderId,
       sender_email: m.senderEmail,
       recipient_email: m.recipientEmail.toLowerCase(),
@@ -146,7 +165,7 @@ export const getAttachmentUrls = async (paths) => {
 
 /* ---------- Voice messages ---------- */
 
-const voiceExt = (mime = '') => (mime.includes('mp4') ? 'm4a' : mime.includes('ogg') ? 'ogg' : 'webm');
+export const voiceExt = (mime = '') => (mime.includes('mp4') ? 'm4a' : mime.includes('ogg') ? 'ogg' : 'webm');
 
 export const uploadVoice = async (userId, blob, mime) => {
   const path = `${userId}/${crypto.randomUUID()}.${voiceExt(mime)}`;
@@ -178,6 +197,7 @@ export const getVoiceUrl = async (path) => {
 
 export const scheduleLetter = async (m) => {
   const { error } = await supabase.from('scheduled_letters').insert([{
+    ...(m.id ? { id: m.id } : {}),
     sender_id: m.senderId,
     sender_email: m.senderEmail,
     recipient_email: m.recipientEmail.toLowerCase(),

@@ -24,6 +24,8 @@ import ProfileSettings from '../components/ProfileSettings';
 import ScheduledList from '../components/ScheduledList';
 import ProfilesList from '../components/ProfilesList';
 import ProfileSheet from '../components/ProfileSheet';
+import OfflineBanner from '../components/OfflineBanner';
+import { useOutbox } from '../hooks/useOutbox';
 
 const TABS = [
   ['all', 'All'],
@@ -127,7 +129,7 @@ export default function Home({ user, onSignOut }) {
         setHasMore(page.length === PAGE_SIZE);
       } catch (err) {
         console.error('Failed to load messages:', err);
-        if (reqId === reqRef.current) toast.error("Couldn't load your letters. Check your connection and try again.");
+        if (reqId === reqRef.current && navigator.onLine) toast.error("Couldn't load your letters. Check your connection and try again.");
       } finally {
         if (reqId === reqRef.current) {
           setLoading(false);
@@ -260,6 +262,16 @@ export default function Home({ user, onSignOut }) {
     };
   }, []);
 
+  /* ---------- Offline outbox ---------- */
+
+  const outbox = useOutbox(user, {
+    onSent: (n) => {
+      toast.success(n > 1 ? `Your ${n} waiting letters were sent 💌` : 'Your waiting letter was sent 💌');
+      refreshRef.current();
+      setScheduledVersion((v) => v + 1);
+    },
+  });
+
   /* ---------- Helpers ---------- */
 
   const isSentByMe = (msg) => msg.senderEmail.toLowerCase() === myEmail;
@@ -382,6 +394,14 @@ export default function Home({ user, onSignOut }) {
 
   const handleMessageSent = async (count = 1, info) => {
     closeCompose();
+    if (info?.queued) {
+      toast.info(
+        count > 1
+          ? "You're offline. Your letters are saved and will send by themselves when you're back 📮"
+          : "You're offline. Your letter is saved and will send by itself when you're back 📮"
+      );
+      return;
+    }
     if (info?.scheduled) {
       toast.success(
         count > 1
@@ -400,7 +420,11 @@ export default function Home({ user, onSignOut }) {
 
   return (
     <div className="min-h-screen flex flex-col relative overflow-hidden">
-      <div className="p-4 flex justify-between items-center border-b border-gray-700/50 z-10 bg-charcoal/80 backdrop-blur-md sticky top-0">
+      <OfflineBanner outbox={outbox} />
+      <div
+        className="p-4 flex justify-between items-center border-b border-gray-700/50 z-10 bg-charcoal/80 backdrop-blur-md sticky top-0"
+        style={{ top: outbox.visible ? '2.25rem' : 0 }}
+      >
         <div className="flex items-center gap-3">
           <button
             onClick={() => setShowProfile(true)}

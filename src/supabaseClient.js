@@ -16,6 +16,20 @@ const write = (on) => {
   try { on ? sessionStorage.setItem(KEY, '1') : sessionStorage.removeItem(KEY) } catch { /* ignore */ }
 }
 
+// The signed-in user, read straight from storage. Lets the app open with no connection
+// (supabase.getSession() gives up when it can't refresh an expired token).
+export const getCachedSession = () => {
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)
+      if (!/^sb-.+-auth-token$/.test(k)) continue
+      const s = JSON.parse(localStorage.getItem(k))
+      if (s?.user?.id && s?.user?.email) return s
+    }
+  } catch { /* ignore */ }
+  return null
+}
+
 export const isRecovering = () => {
   try { return sessionStorage.getItem(KEY) === '1' } catch { return false }
 }
