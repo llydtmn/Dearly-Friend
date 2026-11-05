@@ -1,6 +1,6 @@
 import { supabase } from '../supabaseClient';
 
-const fromRow = (r) => ({
+export const fromRow = (r) => ({
   id: r.id,
   senderId: r.sender_id,
   senderEmail: r.sender_email,
@@ -63,4 +63,29 @@ export const deleteMessage = async (id) => {
   if (!data || data.length === 0) {
     throw new Error('Delete was blocked. Check the Supabase delete policy.');
   }
+};
+
+/**
+ * Live inbox: listens for changes to the messages table.
+ * Requires Realtime to be enabled for the table in Supabase
+ * (see SETUP.md). RLS still decides which INSERT/UPDATE rows you receive.
+ * Returns an unsubscribe function.
+ */
+export const subscribeToMessages = (userId, { onInsert, onUpdate, onDelete, onStatus }) => {
+  const channel = supabase
+    .channel(`messages-live-${userId}`)
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (p) =>
+      onInsert?.(fromRow(p.new))
+    )
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, (p) =>
+      onUpdate?.(fromRow(p.new))
+    )
+    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, (p) =>
+      onDelete?.(p.old?.id)
+    )
+    .subscribe((status) => onStatus?.(status));
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
 };

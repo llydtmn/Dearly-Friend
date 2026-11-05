@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { X, Moon, Sun } from 'lucide-react';
+import { X, Moon, Sun, Reply } from 'lucide-react';
 import { useTypingAnimation } from '../hooks/useTypingAnimation';
 
-export default function LetterContent({ message, onClose }) {
+export default function LetterContent({ message, onClose, onReply }) {
 const [dark, setDark] = useState(
   () => localStorage.getItem('dearly_letter_dark') !== '0'
 );
@@ -82,6 +82,23 @@ const [dark, setDark] = useState(
             </button>
           )}
         </div>
+
+        {/* Footer */}
+        {onReply && (
+          <div
+            className={`p-3 flex justify-end border-t transition-colors duration-500 ${
+              dark ? 'bg-black/30 border-white/10' : 'bg-paper-dark/40 border-ink/10'
+            }`}
+          >
+            <button
+              onClick={onReply}
+              className="flex items-center gap-2 bg-heart text-paper px-5 py-2 rounded-sm font-sans text-sm tracking-wide hover:bg-red-900 transition-colors"
+            >
+              <Reply size={16} />
+              Reply
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

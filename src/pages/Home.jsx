@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Search, Plus, User, LogOut } from 'lucide-react';
-import { getMessages, markAsRead, deleteMessage } from '../services/messageService';
+import { getMessages, markAsRead, deleteMessage, subscribeToMessages } from '../services/messageService';
+import { useToast } from '../components/Toast';
 import MessageCard from '../components/MessageCard';
 import ComposeMessage from '../components/ComposeMessage';
 import EnvelopeScreen from '../components/EnvelopeScreen';
@@ -16,17 +17,61 @@ export default function Home({ user, onSignOut }) {
   const [activeMessage, setActiveMessage] = useState(null);
   const [isEnvelopeOpen, setIsEnvelopeOpen] = useState(false);
   const [swipedId, setSwipedId] = useState(null);
+  const [replyTo, setReplyTo] = useState(null);
 
-  const loadMessages = async () => {
+  const toast = useToast();
+  const messagesRef = useRef([]);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  const loadMessages = async ({ quiet = false } = {}) => {
     try {
       setMessages(await getMessages());
     } catch (err) {
       console.error('Failed to load messages:', err);
+      if (!quiet) toast.error("Couldn't load your letters. Check your connection and try again.");
     }
   };
 
   useEffect(() => {
     loadMessages();
+  }, []);
+
+  // Live inbox: new, updated and deleted letters show up without a refresh
+  useEffect(() => {
+    const unsubscribe = subscribeToMessages(user.id, {
+      onInsert: (msg) => {
+        if (messagesRef.current.some((m) => m.id === msg.id)) return;
+        const mine = msg.senderEmail?.toLowerCase() === myEmail;
+        const forMe = msg.recipientEmail?.toLowerCase() === myEmail;
+        if (!mine && !forMe) return;
+        setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [msg, ...prev]));
+        if (forMe && !mine) toast.info(`A new letter from ${msg.senderEmail} just arrived 💌`);
+      },
+      onUpdate: (msg) => {
+        setMessages((prev) => prev.map((m) => (m.id === msg.id ? msg : m)));
+      },
+      onDelete: (id) => {
+        if (!id) return;
+        setMessages((prev) => prev.filter((m) => m.id !== id));
+        setActiveMessage((cur) => (cur?.id === id ? null : cur));
+      },
+    });
+    return unsubscribe;
+  }, [user.id, myEmail]);
+
+  // Catch up on anything missed while the app was in the background (phones suspend sockets)
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') loadMessages({ quiet: true });
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('online', onVisible);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('online', onVisible);
+    };
   }, []);
 
   useEffect(() => {
@@ -47,7 +92,7 @@ export default function Home({ user, onSignOut }) {
     if (!msg.isRead && !isSentByMe(msg)) {
       try {
         await markAsRead(msg.id);
-        await loadMessages();
+        setMessages((prev) => prev.map((m) => (m.id === msg.id ? { ...m, isRead: true } : m)));
       } catch (err) {
         console.error(err);
       }
@@ -66,13 +111,30 @@ export default function Home({ user, onSignOut }) {
       setSwipedId(null);
     } catch (err) {
       console.error('Failed to delete message:', err);
-      alert('Could not delete this message.');
+      toast.error("Couldn't delete this letter. Please try again.");
     }
   };
 
-  const handleMessageSent = async () => {
+  const handleReply = (msg) => {
+    setReplyTo(msg);
+    handleCloseLetter();
+    setIsComposing(true);
+  };
+
+  const openCompose = () => {
+    setReplyTo(null);
+    setIsComposing(true);
+  };
+
+  const closeCompose = () => {
     setIsComposing(false);
-    await loadMessages();
+    setReplyTo(null);
+  };
+
+  const handleMessageSent = async (count = 1) => {
+    closeCompose();
+    toast.success(count > 1 ? `Your ${count} letters are on their way 💌` : 'Your letter is on its way 💌');
+    await loadMessages({ quiet: true });
   };
 
   const filteredMessages = messages.filter((msg) => {
@@ -111,7 +173,7 @@ export default function Home({ user, onSignOut }) {
           </div>
         </div>
         <div className="flex items-center">
-          <button onClick={() => setIsComposing(true)} className="text-gray-300 hover:text-paper transition-colors p-2">
+          <button onClick={openCompose} aria-label="Write a letter" className="text-gray-300 hover:text-paper transition-colors p-2">
             <Plus size={24} />
           </button>
           <button onClick={onSignOut} title="Sign out" className="text-gray-300 hover:text-paper transition-colors p-2">
@@ -153,14 +215,24 @@ export default function Home({ user, onSignOut }) {
       </div>
 
       {isComposing && (
-        <ComposeMessage user={user} onClose={() => setIsComposing(false)} onSent={handleMessageSent} />
+        <ComposeMessage
+          key={replyTo ? `reply-${replyTo.id}` : 'new'}
+          user={user}
+          replyTo={replyTo}
+          onClose={closeCompose}
+          onSent={handleMessageSent}
+        />
       )}
 
       {activeMessage &&
         (!isEnvelopeOpen ? (
           <EnvelopeScreen onOpen={() => setIsEnvelopeOpen(true)} />
         ) : (
-          <LetterContent message={activeMessage} onClose={handleCloseLetter} />
+          <LetterContent
+            message={activeMessage}
+            onClose={handleCloseLetter}
+            onReply={isSentByMe(activeMessage) ? undefined : () => handleReply(activeMessage)}
+          />
         ))}
     </div>
   );
