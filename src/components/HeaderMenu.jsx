@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { MoreVertical, History, Archive } from 'lucide-react';
 
 /** Dropdown in the top bar: History (my deleted letters) and Archive (letters I tucked away). */
-export default function HeaderMenu({ onHistory, onArchive, archiveActive = false }) {
+export default function HeaderMenu({ onHistory, onArchive }) {
   const [open, setOpen] = useState(false);
   const box = useRef(null);
 
@@ -50,12 +50,7 @@ export default function HeaderMenu({ onHistory, onArchive, archiveActive = false
           <button role="menuitem" type="button" onClick={pick(onHistory)} className={item}>
             <History size={18} /> History
           </button>
-          <button
-            role="menuitem"
-            type="button"
-            onClick={pick(onArchive)}
-            className={`${item} ${archiveActive ? 'text-paper' : ''}`}
-          >
+          <button role="menuitem" type="button" onClick={pick(onArchive)} className={item}>
             <Archive size={18} /> Archive
           </button>
         </div>

@@ -36,12 +36,8 @@ export const getMessages = async ({ filter = 'all', search = '', myEmail, before
     .select(filter === 'keepsakes' ? '*, keepsakes!inner(message_id)' : '*');
 
   // Each person only sees letters they haven't removed from their own mailbox.
-  // Archived letters live in the Archive view only.
-  if (filter === 'archive') {
-    q = q.or(
-      `and(sender_email.eq.${myEmail},deleted_by_sender.eq.false,archived_by_sender.eq.true),and(recipient_email.eq.${myEmail},deleted_by_recipient.eq.false,archived_by_recipient.eq.true)`
-    );
-  } else if (filter === 'sent') {
+  // Archived letters live in the Archive window only.
+  if (filter === 'sent') {
     q = q.eq('sender_email', myEmail).eq('deleted_by_sender', false).eq('archived_by_sender', false);
   } else if (filter === 'unread') {
     q = q.neq('sender_email', myEmail).eq('deleted_by_recipient', false).eq('archived_by_recipient', false);
@@ -135,6 +131,20 @@ export const deleteMessageForEveryone = async (msg) => {
   if (error) throw error;
   await removeAttachments(msg.attachments);
   await removeVoice(msg.voicePath);
+};
+
+// Letters I archived (not deleted), newest first
+export const getArchivedMessages = async (myEmail, limit = 100) => {
+  const { data, error } = await supabase
+    .from('messages')
+    .select('*')
+    .or(
+      `and(sender_email.eq.${myEmail},deleted_by_sender.eq.false,archived_by_sender.eq.true),and(recipient_email.eq.${myEmail},deleted_by_recipient.eq.false,archived_by_recipient.eq.true)`
+    )
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []).map(fromRow);
 };
 
 // Moves the letter into (or out of) MY Archive. The other person's copy is untouched.

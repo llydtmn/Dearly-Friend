@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Search, Plus, User, LogOut, Inbox, Users, Star, Clock, ArrowLeft } from 'lucide-react';
+import { Search, Plus, User, LogOut, Inbox, Users, Star, Clock } from 'lucide-react';
 import {
   getMessages,
   getMessage,
@@ -28,6 +28,7 @@ import ProfilesList from '../components/ProfilesList';
 import ProfileSheet from '../components/ProfileSheet';
 import OfflineBanner from '../components/OfflineBanner';
 import DeletedLetters from '../components/DeletedLetters';
+import ArchivedLetters from '../components/ArchivedLetters';
 import HeaderMenu from '../components/HeaderMenu';
 import { useOutbox } from '../hooks/useOutbox';
 
@@ -45,7 +46,6 @@ const EMPTY_TEXT = {
   unread: 'No unread letters.',
   sent: "You haven't sent any letters yet.",
   keepsakes: 'Star a letter to keep it here.',
-  archive: 'Nothing archived. Swipe a letter to the right to archive it.',
 };
 
 // Same rules the database applies, used to keep the visible list in step with live changes
@@ -54,7 +54,7 @@ const matchesView = (msg, { filter, term, keepsakeIds }, myEmail) => {
   const sent = msg.senderEmail.toLowerCase() === myEmail;
   if (sent ? msg.deletedBySender : msg.deletedByRecipient) return false; // I removed my copy
   const archivedForMe = sent ? msg.archivedBySender : msg.archivedByRecipient;
-  if (filter === 'archive' ? !archivedForMe : archivedForMe) return false; // archived letters only show in Archive
+  if (archivedForMe) return false; // archived letters only show in the Archive window
   if (filter === 'unread' && (msg.isRead || sent)) return false;
   if (filter === 'sent' && !sent) return false;
   if (filter === 'keepsakes' && !keepsakeIds.has(msg.id)) return false;
@@ -97,6 +97,7 @@ export default function Home({ user, onSignOut }) {
   const [viewProfile, setViewProfile] = useState(null);
   const [showProfile, setShowProfile] = useState(false);
   const [showDeleted, setShowDeleted] = useState(false);
+  const [showArchive, setShowArchive] = useState(false);
   const [activeMessage, setActiveMessage] = useState(null);
   const [isEnvelopeOpen, setIsEnvelopeOpen] = useState(false);
   const [swipedId, setSwipedId] = useState(null);
@@ -244,9 +245,8 @@ export default function Home({ user, onSignOut }) {
         const sentByMe = msg.senderEmail?.toLowerCase() === myEmail;
         const hiddenForMe = sentByMe ? msg.deletedBySender : msg.deletedByRecipient;
         const archivedForMe = sentByMe ? msg.archivedBySender : msg.archivedByRecipient;
-        const wrongView = viewRef.current.filter === 'archive' ? !archivedForMe : archivedForMe;
         setMessages((prev) =>
-          hiddenForMe || wrongView ? prev.filter((m) => m.id !== msg.id) : prev.map((m) => (m.id === msg.id ? msg : m))
+          hiddenForMe || archivedForMe ? prev.filter((m) => m.id !== msg.id) : prev.map((m) => (m.id === msg.id ? msg : m))
         );
         refreshUnreadRef.current();
       },
@@ -360,16 +360,14 @@ export default function Home({ user, onSignOut }) {
 
   // Archive / unarchive MY copy (the other person is not affected)
   const handleArchive = async (msg) => {
-    const sent = msg.senderEmail.toLowerCase() === myEmail;
-    const wasArchived = sent ? msg.archivedBySender : msg.archivedByRecipient;
     try {
-      await archiveMessage(msg.id, !wasArchived);
+      await archiveMessage(msg.id, true);
       setMessages((prev) => prev.filter((m) => m.id !== msg.id)); // it moves to the other view
       setActiveMessage((cur) => (cur?.id === msg.id ? null : cur));
       setSwipedId(null);
       setSwipedSide(null);
       refreshUnread();
-      toast.success(wasArchived ? 'Moved back out of Archive.' : 'Letter archived.');
+      toast.success('Letter archived. Find it under ⋮ → Archive.');
     } catch (err) {
       console.error('Failed to archive message:', err);
       toast.error("Couldn't update the archive. Please try again.");
@@ -496,8 +494,7 @@ export default function Home({ user, onSignOut }) {
           </button>
           <HeaderMenu
             onHistory={() => setShowDeleted(true)}
-            onArchive={() => setFilter('archive')}
-            archiveActive={filter === 'archive'}
+            onArchive={() => setShowArchive(true)}
           />
           <button onClick={handleSignOut} title="Sign out" className="text-gray-300 hover:text-paper transition-colors p-2">
             <LogOut size={20} />
@@ -516,18 +513,6 @@ export default function Home({ user, onSignOut }) {
           </button>
         ))}
       </div>
-
-      {filter === 'archive' && (
-        <div className="px-4 py-2 flex items-center gap-3 text-sm font-sans z-10 bg-charcoal/80 backdrop-blur-md border-b border-gray-800">
-          <button
-            onClick={() => setFilter('all')}
-            className="flex items-center gap-1 text-gray-300 hover:text-paper transition-colors"
-          >
-            <ArrowLeft size={16} /> Back
-          </button>
-          <span className="text-paper font-semibold">Archive</span>
-        </div>
-      )}
 
       {/* Mobile only: All / Unread / Sent switch (the bottom bar replaces the tab row) */}
       {(filter === 'all' || filter === 'unread' || filter === 'sent') && (
@@ -591,7 +576,6 @@ export default function Home({ user, onSignOut }) {
                   onClose={() => setSwipedId((cur) => (cur === msg.id ? null : cur))}
                   onDelete={(scope) => handleDelete(msg, scope)}
                   onArchive={() => handleArchive(msg)}
-                  isArchived={filter === 'archive'}
                 />
               );
             })}
@@ -656,6 +640,18 @@ export default function Home({ user, onSignOut }) {
             refreshRef.current();
             refreshUnreadRef.current();
           }}
+        />
+      )}
+
+      {showArchive && (
+        <ArchivedLetters
+          myEmail={myEmail}
+          onClose={() => setShowArchive(false)}
+          onUnarchived={() => {
+            refreshRef.current();
+            refreshUnreadRef.current();
+          }}
+          onOpenLetter={handleMessageClick}
         />
       )}
 
