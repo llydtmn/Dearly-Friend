@@ -3,8 +3,8 @@
  * - NEVER caches Supabase / API traffic: letters are private and must always be live.
  * Bump CACHE_VERSION to force clients to drop old caches.
  */
-const CACHE_VERSION = 'dearly-v1';
-const SHELL = ['/', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png'];
+const CACHE_VERSION = 'dearly-v2';
+const SHELL = ['/', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png', '/badge-96.png'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -63,7 +63,8 @@ self.addEventListener('fetch', (event) => {
 
 /* ===== Push notifications ===== */
 
-const PUSH_ICON = '/icon-192.png';
+const PUSH_ICON = '/icon-192.png'; // big colored icon (right side of the notification)
+const PUSH_BADGE = '/badge-96.png'; // small white-on-transparent icon (status bar / next to the app name)
 
 self.addEventListener('push', (event) => {
   let data = {};
@@ -77,7 +78,7 @@ self.addEventListener('push', (event) => {
     self.registration.showNotification(data.title || 'Dearly', {
       body: data.body || 'You have a new letter.',
       icon: PUSH_ICON,
-      badge: PUSH_ICON,
+      badge: PUSH_BADGE,
       tag: data.tag, // the same letter never shows twice
       data: { url: data.url || '/' },
     })
