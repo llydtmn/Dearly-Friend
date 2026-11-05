@@ -1,7 +1,31 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { ArrowLeft, RefreshCw, Trash2, Search, LogOut, Lock } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { useToast } from '../components/Toast';
+
+// One id per browser tab: reloading keeps it, a second tab or device gets its own
+const lockSessionId = () => {
+  try {
+    let id = sessionStorage.getItem('dearly_admin_session');
+    if (!id) {
+      id = crypto.randomUUID();
+      sessionStorage.setItem('dearly_admin_session', id);
+    }
+    return id;
+  } catch {
+    return crypto.randomUUID();
+  }
+};
+
+const CHECK_EVERY_MS = 10000; // keeps our spot, or retries while someone else is in
+
+function Center({ children }) {
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center gap-4 text-center px-6 bg-[#141414] text-gray-100 relative z-50 font-sans">
+      {children}
+    </div>
+  );
+}
 
 const when = (iso) => (iso ? new Date(iso).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }) : '-');
 
@@ -83,31 +107,80 @@ function AdminLogin() {
 
 function AdminPanel({ user }) {
   const toast = useToast();
+  const sessionId = useRef(lockSessionId()).current;
+  const [phase, setPhase] = useState('claiming'); // claiming | ready | busy | lost | denied
+  const [holder, setHolder] = useState('');
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [denied, setDenied] = useState(false);
   const [search, setSearch] = useState('');
   const [target, setTarget] = useState(null); // the user being deleted
   const [typed, setTyped] = useState('');
   const [deleting, setDeleting] = useState(false);
+  const denied = phase === 'denied';
+
+  // Take (or keep) the single admin seat. Runs on a timer, so it doubles as the heartbeat.
+  const claim = useCallback(async () => {
+    const { error } = await supabase.rpc('admin_claim', { p_session: sessionId });
+    if (!error) {
+      setPhase('ready');
+    } else if (/not allowed/i.test(error.message)) {
+      setPhase('denied');
+    } else if (/admin_in_use/i.test(error.message)) {
+      setHolder(error.message.split('ADMIN_IN_USE:')[1]?.trim() ?? '');
+      setPhase((p) => (p === 'ready' ? 'lost' : 'busy'));
+    }
+    // other errors (no connection...): keep the current screen and try again on the next beat
+  }, [sessionId]);
+
+  useEffect(() => {
+    claim();
+    const timer = setInterval(claim, CHECK_EVERY_MS);
+    return () => clearInterval(timer);
+  }, [claim]);
+
+  // Give the seat back when leaving (the database also frees it on its own after ~45 seconds)
+  useEffect(() => {
+    const release = () => {
+      supabase.rpc('admin_release', { p_session: sessionId }).then(() => {});
+    };
+    window.addEventListener('pagehide', release);
+    return () => {
+      window.removeEventListener('pagehide', release);
+      release();
+    };
+  }, [sessionId]);
+
+  const leave = async () => {
+    await supabase.rpc('admin_release', { p_session: sessionId });
+    await supabase.auth.signOut();
+  };
+
+  const lockProblem = (error) => {
+    if (/admin_in_use|admin_lock_lost/i.test(error.message)) {
+      setPhase('lost');
+      return true;
+    }
+    return false;
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
-    const { data, error } = await supabase.rpc('admin_list_users');
+    const { data, error } = await supabase.rpc('admin_list_users', { p_session: sessionId });
     if (error) {
-      if (/not allowed/i.test(error.message)) setDenied(true);
-      else toast.error(`Couldn't load users: ${error.message}`);
+      if (/not allowed/i.test(error.message)) setPhase('denied');
+      else if (!/admin_in_use|admin_lock_lost/i.test(error.message)) toast.error(`Couldn't load users: ${error.message}`);
+      else setPhase('lost');
     } else {
-      setDenied(false);
       setUsers(data ?? []);
     }
     setLoading(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [sessionId]);
 
+  // Load the list whenever we (re)gain the seat
   useEffect(() => {
-    load();
-  }, [load]);
+    if (phase === 'ready') load();
+  }, [phase, load]);
 
   const shown = useMemo(() => {
     const t = search.trim().toLowerCase();
@@ -123,9 +196,10 @@ function AdminPanel({ user }) {
   const confirmDelete = async () => {
     if (!target || typed.trim().toLowerCase() !== target.email.toLowerCase()) return;
     setDeleting(true);
-    const { error } = await supabase.rpc('admin_delete_user', { target: target.id });
+    const { error } = await supabase.rpc('admin_delete_user', { target: target.id, p_session: sessionId });
     setDeleting(false);
     if (error) {
+      if (lockProblem(error)) return;
       toast.error(`Couldn't delete: ${error.message}`);
       return;
     }
@@ -134,11 +208,30 @@ function AdminPanel({ user }) {
     setTarget(null);
   };
 
+  if (phase === 'claiming') return <Center><p className="text-gray-300">Checking...</p></Center>;
+
+  if (phase === 'busy' || phase === 'lost') {
+    return (
+      <Center>
+        <p className="font-handwriting text-3xl">
+          {phase === 'lost' ? 'Admin was taken over.' : 'Admin is in use right now.'}
+        </p>
+        <p className="text-sm text-gray-300 max-w-sm">
+          {holder ? `${holder} is using it. ` : ''}Only one person can use the admin page at a time. This page checks again
+          every few seconds and will open when it's free.
+        </p>
+        <button onClick={leave} className="text-sm underline text-gray-300 hover:text-paper">
+          Sign out
+        </button>
+      </Center>
+    );
+  }
+
   if (denied) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-4 text-center px-6 bg-[#141414] text-gray-100 relative z-50">
         <p className="font-handwriting text-3xl">{user.email} isn't an admin.</p>
-        <button onClick={() => supabase.auth.signOut()} className="text-sm underline text-gray-300 hover:text-paper">
+        <button onClick={leave} className="text-sm underline text-gray-300 hover:text-paper">
           Sign out and use a different account
         </button>
       </div>
@@ -165,7 +258,7 @@ function AdminPanel({ user }) {
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh
           </button>
           <button
-            onClick={() => supabase.auth.signOut()}
+            onClick={leave}
             title="Sign out"
             aria-label="Sign out"
             className="flex items-center gap-2 text-sm px-3 py-1.5 border border-gray-600 rounded-sm hover:border-gray-400"

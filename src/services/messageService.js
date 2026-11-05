@@ -16,6 +16,8 @@ export const fromRow = (r) => ({
   voicePath: r.voice_path ?? null,
   isRead: r.is_read,
   date: r.created_at,
+  deletedBySender: !!r.deleted_by_sender,
+  deletedByRecipient: !!r.deleted_by_recipient,
 });
 
 // Keep user input from breaking PostgREST's filter syntax
@@ -31,8 +33,14 @@ export const getMessages = async ({ filter = 'all', search = '', myEmail, before
     .from('messages')
     .select(filter === 'keepsakes' ? '*, keepsakes!inner(message_id)' : '*');
 
-  if (filter === 'sent') q = q.eq('sender_email', myEmail);
-  else if (filter === 'all' || filter === 'unread') q = q.neq('sender_email', myEmail);
+  // Each person only sees letters they haven't removed from their own mailbox
+  if (filter === 'sent') q = q.eq('sender_email', myEmail).eq('deleted_by_sender', false);
+  else if (filter === 'all' || filter === 'unread') q = q.neq('sender_email', myEmail).eq('deleted_by_recipient', false);
+  else {
+    q = q.or(
+      `and(sender_email.eq.${myEmail},deleted_by_sender.eq.false),and(recipient_email.eq.${myEmail},deleted_by_recipient.eq.false)`
+    );
+  }
   if (filter === 'unread') q = q.eq('is_read', false);
 
   const term = cleanTerm(search);
@@ -56,7 +64,10 @@ const PROFILES_CACHE = 'dearly_profiles_cache';
 
 export const getProfiles = async () => {
   try {
-    const { data, error } = await supabase.from('profiles').select('id, email, name, avatar_path, bio');
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, email, name, avatar_path, bio')
+      .eq('hidden', false); // admin accounts are kept out of the people list
     if (error) throw error;
     try {
       localStorage.setItem(PROFILES_CACHE, JSON.stringify(data ?? []));
@@ -100,12 +111,11 @@ export const markAsRead = async (id) => {
   if (error) throw error;
 };
 
+// Removes the letter from MY mailbox only. The other person keeps their copy.
+// (The database deletes the row for good once both people have removed it.)
 export const deleteMessage = async (id) => {
-  const { data, error } = await supabase.from('messages').delete().eq('id', id).select('id');
+  const { error } = await supabase.rpc('delete_message_for_me', { p_id: id });
   if (error) throw error;
-  if (!data || data.length === 0) {
-    throw new Error('Delete was blocked. Check the Supabase delete policy.');
-  }
 };
 
 /* ---------- Keepsakes (private to each person) ---------- */
@@ -259,6 +269,7 @@ export const getUnreadCount = async (myEmail) => {
     .from('messages')
     .select('id', { count: 'exact', head: true })
     .neq('sender_email', myEmail)
+    .eq('deleted_by_recipient', false)
     .eq('is_read', false);
   if (error) throw error;
   return count ?? 0;

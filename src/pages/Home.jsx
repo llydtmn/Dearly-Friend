@@ -47,6 +47,7 @@ const EMPTY_TEXT = {
 const matchesView = (msg, { filter, term, keepsakeIds }, myEmail) => {
   if (filter === 'scheduled' || filter === 'profiles') return false;
   const sent = msg.senderEmail.toLowerCase() === myEmail;
+  if (sent ? msg.deletedBySender : msg.deletedByRecipient) return false; // I removed my copy
   if (filter === 'unread' && (msg.isRead || sent)) return false;
   if (filter === 'sent' && !sent) return false;
   if (filter === 'all' && sent) return false;
@@ -232,7 +233,11 @@ export default function Home({ user, onSignOut }) {
         }
       },
       onUpdate: (msg) => {
-        setMessages((prev) => prev.map((m) => (m.id === msg.id ? msg : m)));
+        const sentByMe = msg.senderEmail?.toLowerCase() === myEmail;
+        const hiddenForMe = sentByMe ? msg.deletedBySender : msg.deletedByRecipient;
+        setMessages((prev) =>
+          hiddenForMe ? prev.filter((m) => m.id !== msg.id) : prev.map((m) => (m.id === msg.id ? msg : m))
+        );
         refreshUnreadRef.current();
       },
       onDelete: (id) => {
@@ -308,7 +313,9 @@ export default function Home({ user, onSignOut }) {
       try {
         const msg = await getMessage(id);
         window.history.replaceState({}, '', '/');
-        if (msg) handleMessageClick(msg);
+        const hiddenForMe =
+          msg && (msg.senderEmail.toLowerCase() === myEmail ? msg.deletedBySender : msg.deletedByRecipient);
+        if (msg && !hiddenForMe) handleMessageClick(msg);
         else toast.error("That letter isn't in this inbox. Make sure you're signed in with the email it was sent to.");
       } catch (err) {
         console.error('Failed to open linked letter:', err);
