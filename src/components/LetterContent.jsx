@@ -44,9 +44,9 @@ export default function LetterContent({ message, onClose, onReply, isStarred = f
   const hasFooter = isDone || !!onReply;
 
   return (
-    <div className="absolute inset-0 bg-charcoal/90 z-30 flex items-center justify-center p-4 animate-fade-in">
+    <div className="fixed inset-0 bg-charcoal/90 z-30 flex items-center justify-center p-4">
       <div
-        className={`w-full max-w-3xl h-[85vh] rounded-sm shadow-2xl relative flex flex-col overflow-hidden transition-colors duration-500 ${
+        className={`w-full max-w-3xl h-[85vh] rounded-sm shadow-2xl relative flex flex-col overflow-hidden animate-letter-in transition-colors duration-500 ${
           dark ? 'paper-dark-grain' : 'bg-paper bg-paper-texture'
         }`}
       >

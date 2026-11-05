@@ -176,6 +176,10 @@ export default function Landing({ onSignIn, onSignUp }) {
         <span className="font-handwriting text-xl text-gray-200">Dearly</span>
         <span className="mx-2">·</span>
         Written with care, for the people you miss.
+        <span className="mx-2">·</span>
+        <a href="/privacy" className="hover:text-paper underline">Privacy</a>
+        <span className="mx-2">·</span>
+        <a href="/terms" className="hover:text-paper underline">Terms</a>
       </footer>
     </div>
   );

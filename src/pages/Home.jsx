@@ -445,6 +445,7 @@ export default function Home({ user, onSignOut }) {
           user={user}
           profile={profile}
           onClose={() => setShowProfile(false)}
+          onAccountDeleted={onSignOut}
           onSaved={(saved) => {
             setProfile(saved);
             setProfiles((prev) => prev.map((p) => (p.id === saved.id ? { ...p, ...saved } : p)));
@@ -454,7 +455,11 @@ export default function Home({ user, onSignOut }) {
 
       {activeMessage &&
         (!isEnvelopeOpen ? (
-          <EnvelopeScreen onOpen={() => setIsEnvelopeOpen(true)} />
+          <EnvelopeScreen
+            message={activeMessage}
+            onOpen={() => setIsEnvelopeOpen(true)}
+            onClose={handleCloseLetter}
+          />
         ) : (
           <LetterContent
             message={activeMessage}

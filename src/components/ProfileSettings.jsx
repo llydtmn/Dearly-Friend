@@ -4,8 +4,10 @@ import { supabase } from '../supabaseClient';
 import { useToast } from './Toast';
 import { compressImage } from '../utils/image';
 import { avatarUrl, updateMyProfile, uploadAvatar, removeAvatarFile } from '../services/profileService';
+import { getBlockedSenders, unblockSender } from '../services/emailBlockService';
+import DeleteAccount from './DeleteAccount';
 
-export default function ProfileSettings({ user, profile, onClose, onSaved }) {
+export default function ProfileSettings({ user, profile, onClose, onSaved, onAccountDeleted }) {
   const toast = useToast();
   const fallbackName = user.user_metadata?.name || user.email.split('@')[0];
 
@@ -18,6 +20,21 @@ export default function ProfileSettings({ user, profile, onClose, onSaved }) {
 
   const fileRef = useRef(null);
   const blobUrlRef = useRef(null);
+
+  const [blocked, setBlocked] = useState([]);
+  useEffect(() => {
+    getBlockedSenders().then(setBlocked).catch(() => {});
+  }, []);
+
+  const allowAgain = async (senderEmail) => {
+    try {
+      await unblockSender(user.email, senderEmail);
+      setBlocked((prev) => prev.filter((e) => e !== senderEmail));
+      toast.success(`You'll get email notifications from ${senderEmail} again.`);
+    } catch (err) {
+      toast.error(`Couldn't update that: ${err.message || 'something went wrong'}`);
+    }
+  };
 
   useEffect(
     () => () => {
@@ -148,7 +165,30 @@ export default function ProfileSettings({ user, profile, onClose, onSaved }) {
             </span>
           </label>
 
-          <p className="text-xs text-ink/50">Signed in as {user.email}</p>
+          {blocked.length > 0 && (
+            <div>
+              <span className="block text-sm text-ink/70 mb-1">Emails turned off for</span>
+              <ul className="space-y-1">
+                {blocked.map((e) => (
+                  <li key={e} className="flex items-center justify-between text-sm">
+                    <span className="truncate mr-3">{e}</span>
+                    <button type="button" onClick={() => allowAgain(e)} className="text-xs text-heart hover:underline shrink-0">
+                      Allow again
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <div className="pt-2 border-t border-ink/10 space-y-3">
+            <p className="text-xs text-ink/50">
+              Signed in as {user.email} ·{' '}
+              <a href="/privacy" target="_blank" rel="noreferrer" className="underline hover:text-heart">Privacy</a> ·{' '}
+              <a href="/terms" target="_blank" rel="noreferrer" className="underline hover:text-heart">Terms</a>
+            </p>
+            <DeleteAccount user={user} onDeleted={() => { onClose(); onAccountDeleted?.(); }} />
+          </div>
         </div>
 
         <div className="p-4 border-t border-ink/10 flex justify-end gap-3 bg-paper-dark/20">
