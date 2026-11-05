@@ -464,7 +464,7 @@ export default function Home({ user, onSignOut }) {
             onSelect={openProfile}
           />
         ) : loading && visibleMessages.length === 0 ? (
-          <div className="text-center text-gray-500 mt-20 font-handwriting text-2xl">Opening the mailbox...</div>
+          <div className="text-center text-gray-300 mt-20 font-handwriting text-2xl">Opening the mailbox...</div>
         ) : visibleMessages.length === 0 ? (
           <div className="text-center text-gray-300 mt-20 px-6 font-handwriting text-2xl">
             {debouncedSearch ? 'No letters match your search.' : EMPTY_TEXT[filter]}
