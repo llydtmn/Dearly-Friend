@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { supabase } from './supabaseClient';
+import { supabase, isRecovering, clearRecovering } from './supabaseClient';
 import SplashScreen from './components/SplashScreen';
 import Landing from './components/Landing';
 import Login from './components/Login';
@@ -7,9 +7,6 @@ import Home from './pages/Home';
 import Legal from './pages/Legal';
 import ResetPassword from './components/ResetPassword';
 import StopEmailsPrompt from './components/StopEmailsPrompt';
-
-// Captured at load, before the auth client clears the URL: did we arrive from a password-reset email?
-const arrivedViaRecoveryLink = window.location.hash.includes('type=recovery');
 
 export default function App() {
   const path = window.location.pathname.replace(/\/+$/, '');
@@ -22,7 +19,7 @@ function AppInner() {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
   const [authMode, setAuthMode] = useState(null); // null = landing page
-  const [recovering, setRecovering] = useState(arrivedViaRecoveryLink);
+  const [recovering, setRecovering] = useState(isRecovering);
 
   const query = new URLSearchParams(window.location.search);
   const stopSender = (query.get('stop') || '').trim().toLowerCase();
@@ -32,6 +29,8 @@ function AppInner() {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
+      // the recovery event may have fired before this component mounted: the marker still knows
+      if (isRecovering()) setRecovering(true);
       setSession(data.session);
       setLoading(false);
     });
@@ -59,7 +58,7 @@ function AppInner() {
     );
   }
 
-  if (recovering) return <ResetPassword onDone={() => setRecovering(false)} />;
+  if (recovering) return <ResetPassword onDone={() => { clearRecovering(); setRecovering(false); }} />;
 
   const signOut = () => {
     supabase.auth.signOut().catch(() => {});
