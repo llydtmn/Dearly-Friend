@@ -7,12 +7,15 @@ import { avatarUrl, updateMyProfile, uploadAvatar, removeAvatarFile } from '../s
 import { getBlockedSenders, unblockSender } from '../services/emailBlockService';
 import DeleteAccount from './DeleteAccount';
 
+const BIO_MAX = 200;
+
 export default function ProfileSettings({ user, profile, onClose, onSaved, onAccountDeleted }) {
   const toast = useToast();
   const fallbackName = user.user_metadata?.name || user.email.split('@')[0];
 
   const [name, setName] = useState(profile?.name || fallbackName);
   const [signature, setSignature] = useState(profile?.default_signature ?? '');
+  const [bio, setBio] = useState(profile?.bio ?? '');
   const [preview, setPreview] = useState(avatarUrl(profile?.avatar_path));
   const [newAvatar, setNewAvatar] = useState(null); // compressed Blob, when a new photo was picked
   const [removeAvatar, setRemoveAvatar] = useState(false);
@@ -78,7 +81,7 @@ export default function ProfileSettings({ user, profile, onClose, onSaved, onAcc
     setSaving(true);
     let uploadedPath = null;
     try {
-      const patch = { name: cleanName, default_signature: signature.trim() || null };
+      const patch = { name: cleanName, default_signature: signature.trim() || null, bio: bio.trim() || null };
       if (newAvatar) {
         uploadedPath = await uploadAvatar(user.id, newAvatar);
         patch.avatar_path = uploadedPath;
@@ -162,6 +165,24 @@ export default function ProfileSettings({ user, profile, onClose, onSaved, onAcc
             />
             <span className="block text-xs text-ink/50 mt-1">
               Pre-filled on every new letter. Leave it blank to sign with your name.
+            </span>
+          </label>
+
+          <label className="block">
+            <span className="block text-sm text-ink/70 mb-1">Bio</span>
+            <textarea
+              value={bio}
+              onChange={(e) => setBio(e.target.value)}
+              maxLength={BIO_MAX}
+              rows={3}
+              placeholder="A few words about you..."
+              className="w-full bg-transparent border border-ink/20 focus:border-heart rounded-sm outline-none p-2 resize-none text-sm placeholder-ink/30"
+            />
+            <span className="flex justify-between text-xs text-ink/50 mt-1">
+              <span>Everyone who uses Dearly can see this.</span>
+              <span>
+                {bio.length}/{BIO_MAX}
+              </span>
             </span>
           </label>
 

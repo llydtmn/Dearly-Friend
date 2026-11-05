@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react';
-import { X, Moon, Sun, Reply, Star, RotateCcw } from 'lucide-react';
+import { X, Moon, Sun, Reply, Star, RotateCcw, Mic } from 'lucide-react';
 import { useTypingAnimation } from '../hooks/useTypingAnimation';
-import { getAttachmentUrls } from '../services/messageService';
+import { getAttachmentUrls, getVoiceUrl } from '../services/messageService';
 
 export default function LetterContent({ message, onClose, onReply, isStarred = false, onToggleStar }) {
   const [dark, setDark] = useState(() => localStorage.getItem('dearly_letter_dark') !== '0');
   const [photos, setPhotos] = useState([]);
   const [photoError, setPhotoError] = useState(false);
+  const [voiceUrl, setVoiceUrl] = useState(null);
+  const [voiceError, setVoiceError] = useState(false);
 
   const toggleDark = () => {
     const next = !dark;
@@ -34,6 +36,23 @@ export default function LetterContent({ message, onClose, onReply, isStarred = f
       alive = false;
     };
   }, [message.id, attachmentKey]);
+
+  // The voice message is in a private bucket too
+  useEffect(() => {
+    let alive = true;
+    setVoiceUrl(null);
+    setVoiceError(false);
+    if (!message.voicePath) return undefined;
+    getVoiceUrl(message.voicePath)
+      .then((url) => alive && setVoiceUrl(url))
+      .catch((err) => {
+        console.error('Failed to load voice message:', err);
+        if (alive) setVoiceError(true);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [message.id, message.voicePath]);
 
   const date = new Date(message.date).toLocaleDateString('en-US', {
     month: 'long',
@@ -93,6 +112,21 @@ export default function LetterContent({ message, onClose, onReply, isStarred = f
           <p className={`font-handwriting text-xl leading-loose whitespace-pre-wrap ${!isDone ? 'cursor-blink' : ''}`}>
             {displayText}
           </p>
+
+          {isDone && message.voicePath && (
+            <div
+              className={`mt-10 rounded-sm border p-4 animate-fade-in font-sans ${
+                dark ? 'border-white/10 bg-white/5' : 'border-ink/10 bg-ink/5'
+              }`}
+            >
+              <p className="flex items-center gap-2 text-xs mb-2 opacity-70">
+                <Mic size={14} /> A voice message from {message.senderEmail}
+              </p>
+              {voiceUrl && <audio controls preload="metadata" src={voiceUrl} className="w-full" />}
+              {!voiceUrl && !voiceError && <p className="text-sm opacity-60">Loading voice message...</p>}
+              {voiceError && <p className="text-sm opacity-60">The voice message couldn’t be loaded.</p>}
+            </div>
+          )}
 
           {isDone && photos.length > 0 && (
             <div className={`mt-10 grid gap-3 animate-fade-in ${photos.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>

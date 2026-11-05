@@ -1,12 +1,15 @@
 import { useState, useEffect, useRef } from 'react';
 import { X, ImagePlus, Clock } from 'lucide-react';
 import RecipientSelector from './RecipientSelector';
+import VoiceRecorder from './VoiceRecorder';
 import {
   sendMessage,
   getProfiles,
   scheduleLetter,
   uploadAttachments,
   removeAttachments,
+  uploadVoice,
+  removeVoice,
 } from '../services/messageService';
 import { compressImage } from '../utils/image';
 import { useToast } from './Toast';
@@ -45,17 +48,25 @@ const defaultDeliveryTime = () => {
 const prettyWhen = (value) =>
   new Date(value).toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short' });
 
-export default function ComposeMessage({ user, profile = null, replyTo = null, onClose, onSent }) {
+export default function ComposeMessage({ user, profile = null, replyTo = null, to = null, onClose, onSent }) {
   const toast = useToast();
   const myName = profile?.name || user.user_metadata?.name || user.email.split('@')[0];
 
   // One draft slot for new letters, and one per letter being replied to
-  const draftKey = replyTo ? `dearly_draft_reply_${replyTo.id}_${user.id}` : `dearly_draft_new_${user.id}`;
+  const draftKey = replyTo
+    ? `dearly_draft_reply_${replyTo.id}_${user.id}`
+    : to
+      ? `dearly_draft_to_${to.id}_${user.id}`
+      : `dearly_draft_new_${user.id}`;
 
   const replyEmail = replyTo?.senderEmail?.toLowerCase();
+  // Opened from someone's profile: they start out as the recipient
+  const toEmail = to?.email?.toLowerCase();
+  const baseEmail = replyEmail || toEmail;
+  const baseName = replyEmail ? replyEmail.split('@')[0] : to?.name || '';
   const replyGuessName = replyEmail ? replyEmail.split('@')[0] : '';
   const defaults = {
-    greeting: replyTo ? `Dear, ${replyGuessName}` : DEFAULT_GREETING,
+    greeting: replyTo ? `Dear, ${replyGuessName}` : to ? `Dear, ${baseName}` : DEFAULT_GREETING,
     signature: profile?.default_signature || `- ${myName}`,
   };
 
@@ -69,11 +80,11 @@ export default function ComposeMessage({ user, profile = null, replyTo = null, o
         greeting: saved.greeting ?? defaults.greeting,
         content: saved.content ?? '',
         signature: saved.signature ?? defaults.signature,
-        restored: !isBlank({ content: saved.content ?? '', recipients: savedRecipients }, replyEmail),
+        restored: !isBlank({ content: saved.content ?? '', recipients: savedRecipients }, baseEmail),
       };
     }
     return {
-      recipients: replyEmail ? [{ id: replyEmail, email: replyEmail, name: replyGuessName }] : [],
+      recipients: baseEmail ? [{ id: to?.id || baseEmail, email: baseEmail, name: baseName }] : [],
       greeting: defaults.greeting,
       content: '',
       signature: defaults.signature,
@@ -88,6 +99,7 @@ export default function ComposeMessage({ user, profile = null, replyTo = null, o
   const [signature, setSignature] = useState(initial.signature);
   const [restored, setRestored] = useState(initial.restored);
   const [photos, setPhotos] = useState([]); // [{ id, file, url }]
+  const [voice, setVoice] = useState(null); // { blob, url, mime, seconds }
   const [scheduleOn, setScheduleOn] = useState(false);
   const [deliverAt, setDeliverAt] = useState('');
   const [occasion, setOccasion] = useState('');
@@ -100,13 +112,25 @@ export default function ComposeMessage({ user, profile = null, replyTo = null, o
   const photosRef = useRef([]);
   photosRef.current = photos;
 
+  const voiceRef = useRef(null);
+  voiceRef.current = voice;
+
   // Free the preview URLs when the window closes
   useEffect(
     () => () => {
       photosRef.current.forEach((p) => URL.revokeObjectURL(p.url));
+      if (voiceRef.current) URL.revokeObjectURL(voiceRef.current.url);
     },
     []
   );
+
+  // Replace or remove the recording (and free the old preview URL)
+  const changeVoice = (next) => {
+    setVoice((prev) => {
+      if (prev) URL.revokeObjectURL(prev.url);
+      return next;
+    });
+  };
 
   useEffect(() => {
     getProfiles()
@@ -135,7 +159,7 @@ export default function ComposeMessage({ user, profile = null, replyTo = null, o
     const timer = setTimeout(() => {
       try {
         const draft = { recipients, greeting, content, signature };
-        if (isBlank(draft, replyEmail)) localStorage.removeItem(draftKey);
+        if (isBlank(draft, baseEmail)) localStorage.removeItem(draftKey);
         else localStorage.setItem(draftKey, JSON.stringify({ ...draft, savedAt: Date.now() }));
       } catch {
         /* storage full or blocked: autosave is best-effort */
@@ -153,7 +177,7 @@ export default function ComposeMessage({ user, profile = null, replyTo = null, o
       if (sentRef.current) return;
       try {
         const draft = latest.current;
-        if (isBlank(draft, replyEmail)) localStorage.removeItem(draftKey);
+        if (isBlank(draft, baseEmail)) localStorage.removeItem(draftKey);
         else localStorage.setItem(draftKey, JSON.stringify({ ...draft, savedAt: Date.now() }));
       } catch {
         /* ignore */
@@ -176,7 +200,7 @@ export default function ComposeMessage({ user, profile = null, replyTo = null, o
     } catch {
       /* ignore */
     }
-    setRecipients(replyEmail ? [{ id: replyEmail, email: replyEmail, name: replyGuessName }] : []);
+    setRecipients(baseEmail ? [{ id: to?.id || baseEmail, email: baseEmail, name: baseName }] : []);
     setGreeting(defaults.greeting);
     setContent('');
     setSignature(defaults.signature);
@@ -229,12 +253,22 @@ export default function ComposeMessage({ user, profile = null, replyTo = null, o
   const handleSend = async () => {
     if (!canSend) return;
     setSending(true);
-    setStage(photos.length ? 'Uploading photos...' : '');
+    setStage(photos.length ? 'Uploading photos...' : voice ? 'Uploading voice message...' : '');
     let paths = [];
+    let voicePath = null;
     try {
       if (photos.length) {
         const blobs = await Promise.all(photos.map((p) => compressImage(p.file, { maxSize: 1600, quality: 0.82 })));
         paths = await uploadAttachments(user.id, blobs);
+      }
+      if (voice) {
+        setStage('Uploading voice message...');
+        try {
+          voicePath = await uploadVoice(user.id, voice.blob, voice.mime);
+        } catch (err) {
+          await removeAttachments(paths); // don't leave the photos orphaned
+          throw err;
+        }
       }
       setStage('');
 
@@ -249,6 +283,7 @@ export default function ComposeMessage({ user, profile = null, replyTo = null, o
             content,
             signature,
             attachments: paths,
+            voicePath,
           };
           return scheduleOn
             ? scheduleLetter({ ...base, deliverAt: deliverIso, occasion: occasion.trim(), repeatYearly })
@@ -271,6 +306,7 @@ export default function ComposeMessage({ user, profile = null, replyTo = null, o
 
       if (failed.length === recipients.length) {
         await removeAttachments(paths);
+        await removeVoice(voicePath);
         throw results.find((r) => r.status === 'rejected').reason;
       }
 
@@ -362,6 +398,8 @@ export default function ComposeMessage({ user, profile = null, replyTo = null, o
                 <Clock size={16} /> Schedule for later
               </label>
             </div>
+
+            <VoiceRecorder value={voice} onChange={changeVoice} disabled={sending} />
 
             {photos.length > 0 && (
               <div className="flex flex-wrap gap-2">
@@ -462,6 +500,7 @@ export default function ComposeMessage({ user, profile = null, replyTo = null, o
                   Includes {photos.length} photo{photos.length > 1 ? 's' : ''}.
                 </p>
               )}
+              {voice && <p className="text-sm mb-2">Includes a voice message.</p>}
               <p className="text-xs text-ink/60 mb-5">
                 Double-check the spelling. A private letter can't be unsent once it's delivered.
               </p>

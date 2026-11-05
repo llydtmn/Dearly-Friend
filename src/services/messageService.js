@@ -2,6 +2,7 @@ import { supabase } from '../supabaseClient';
 
 export const PAGE_SIZE = 20;
 const PHOTOS = 'letter-photos';
+const VOICE = 'letter-voice';
 
 export const fromRow = (r) => ({
   id: r.id,
@@ -12,6 +13,7 @@ export const fromRow = (r) => ({
   content: r.content,
   signature: r.signature,
   attachments: r.attachments ?? [],
+  voicePath: r.voice_path ?? null,
   isRead: r.is_read,
   date: r.created_at,
 });
@@ -51,7 +53,7 @@ export const getMessage = async (id) => {
 };
 
 export const getProfiles = async () => {
-  const { data, error } = await supabase.from('profiles').select('id, email, name, avatar_path');
+  const { data, error } = await supabase.from('profiles').select('id, email, name, avatar_path, bio');
   if (error) throw error;
   return data ?? [];
 };
@@ -67,6 +69,7 @@ export const sendMessage = async (m) => {
       content: m.content,
       signature: m.signature,
       attachments: m.attachments ?? [],
+      voice_path: m.voicePath ?? null,
     }])
     .select();
   if (error) throw error;
@@ -141,6 +144,36 @@ export const getAttachmentUrls = async (paths) => {
   return (data ?? []).map((d) => d.signedUrl).filter(Boolean);
 };
 
+/* ---------- Voice messages ---------- */
+
+const voiceExt = (mime = '') => (mime.includes('mp4') ? 'm4a' : mime.includes('ogg') ? 'ogg' : 'webm');
+
+export const uploadVoice = async (userId, blob, mime) => {
+  const path = `${userId}/${crypto.randomUUID()}.${voiceExt(mime)}`;
+  const { error } = await supabase.storage
+    .from(VOICE)
+    .upload(path, blob, { contentType: mime, cacheControl: '31536000' });
+  if (error) throw error;
+  return path;
+};
+
+export const removeVoice = async (path) => {
+  if (!path) return;
+  try {
+    await supabase.storage.from(VOICE).remove([path]);
+  } catch {
+    /* best effort */
+  }
+};
+
+// The bucket is private: the recording is played through a short-lived signed link
+export const getVoiceUrl = async (path) => {
+  if (!path) return null;
+  const { data, error } = await supabase.storage.from(VOICE).createSignedUrl(path, 3600);
+  if (error) throw error;
+  return data?.signedUrl ?? null;
+};
+
 /* ---------- Scheduled letters (delivered by pg_cron) ---------- */
 
 export const scheduleLetter = async (m) => {
@@ -152,6 +185,7 @@ export const scheduleLetter = async (m) => {
     content: m.content,
     signature: m.signature,
     attachments: m.attachments ?? [],
+    voice_path: m.voicePath ?? null,
     occasion: m.occasion || null,
     deliver_at: m.deliverAt,
     repeat_yearly: !!m.repeatYearly,

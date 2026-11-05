@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Search, Plus, User, LogOut, Inbox, Send, Star, Clock } from 'lucide-react';
+import { Search, Plus, User, LogOut, Inbox, Users, Star, Clock } from 'lucide-react';
 import {
   getMessages,
   getMessage,
@@ -21,6 +21,8 @@ import EnvelopeScreen from '../components/EnvelopeScreen';
 import LetterContent from '../components/LetterContent';
 import ProfileSettings from '../components/ProfileSettings';
 import ScheduledList from '../components/ScheduledList';
+import ProfilesList from '../components/ProfilesList';
+import ProfileSheet from '../components/ProfileSheet';
 
 const TABS = [
   ['all', 'All'],
@@ -28,6 +30,7 @@ const TABS = [
   ['sent', 'Sent'],
   ['keepsakes', 'Keepsakes'],
   ['scheduled', 'Scheduled'],
+  ['profiles', 'Profiles'],
 ];
 
 const EMPTY_TEXT = {
@@ -39,7 +42,7 @@ const EMPTY_TEXT = {
 
 // Same rules the database applies, used to keep the visible list in step with live changes
 const matchesView = (msg, { filter, term, keepsakeIds }, myEmail) => {
-  if (filter === 'scheduled') return false;
+  if (filter === 'scheduled' || filter === 'profiles') return false;
   const sent = msg.senderEmail.toLowerCase() === myEmail;
   if (filter === 'unread' && (msg.isRead || sent)) return false;
   if (filter === 'sent' && !sent) return false;
@@ -80,6 +83,8 @@ export default function Home({ user, onSignOut }) {
   const [profiles, setProfiles] = useState([]);
   const [isComposing, setIsComposing] = useState(false);
   const [replyTo, setReplyTo] = useState(null);
+  const [composeTo, setComposeTo] = useState(null); // a profile to write to
+  const [viewProfile, setViewProfile] = useState(null);
   const [showProfile, setShowProfile] = useState(false);
   const [activeMessage, setActiveMessage] = useState(null);
   const [isEnvelopeOpen, setIsEnvelopeOpen] = useState(false);
@@ -135,7 +140,7 @@ export default function Home({ user, onSignOut }) {
 
   // Quietly pull in anything new without disturbing the pages already loaded
   const refreshFirstPage = useCallback(async () => {
-    if (filter === 'scheduled') return;
+    if (filter === 'scheduled' || filter === 'profiles') return;
     const reqId = reqRef.current;
     try {
       const page = await getMessages({ filter, search: debouncedSearch, myEmail, limit: PAGE_SIZE });
@@ -179,7 +184,7 @@ export default function Home({ user, onSignOut }) {
   }, [search]);
 
   useEffect(() => {
-    if (filter === 'scheduled') return;
+    if (filter === 'scheduled' || filter === 'profiles') return;
     loadPage({ reset: true });
   }, [loadPage, filter]);
 
@@ -338,12 +343,26 @@ export default function Home({ user, onSignOut }) {
 
   const openCompose = () => {
     setReplyTo(null);
+    setComposeTo(null);
+    setIsComposing(true);
+  };
+
+  const writeTo = (p) => {
+    setViewProfile(null);
+    setReplyTo(null);
+    setComposeTo(p);
     setIsComposing(true);
   };
 
   const closeCompose = () => {
     setIsComposing(false);
     setReplyTo(null);
+    setComposeTo(null);
+  };
+
+  const openProfile = (p) => {
+    if (p.id === user.id) setShowProfile(true);
+    else setViewProfile(p);
   };
 
   const handleMessageSent = async (count = 1, info) => {
@@ -413,12 +432,13 @@ export default function Home({ user, onSignOut }) {
         ))}
       </div>
 
-      {/* Mobile only: All / Unread switch (the bottom bar replaces the tab row) */}
-      {(filter === 'all' || filter === 'unread') && (
+      {/* Mobile only: All / Unread / Sent switch (the bottom bar replaces the tab row) */}
+      {(filter === 'all' || filter === 'unread' || filter === 'sent') && (
         <div className="md:hidden px-4 py-2 flex gap-2 text-sm font-sans z-10 bg-charcoal/80 backdrop-blur-md border-b border-gray-800">
           {[
             ['all', 'All'],
             ['unread', unreadCount > 0 ? `Unread (${unreadCount > 99 ? '99+' : unreadCount})` : 'Unread'],
+            ['sent', 'Sent'],
           ].map(([key, label]) => (
             <button
               key={key}
@@ -436,6 +456,13 @@ export default function Home({ user, onSignOut }) {
       <div className="flex-1 overflow-y-auto z-10 relative pb-28 md:pb-0">
         {filter === 'scheduled' ? (
           <ScheduledList key={scheduledVersion} />
+        ) : filter === 'profiles' ? (
+          <ProfilesList
+            profiles={profile ? profiles.map((p) => (p.id === profile.id ? { ...p, ...profile } : p)) : profiles}
+            myId={user.id}
+            term={debouncedSearch}
+            onSelect={openProfile}
+          />
         ) : loading && visibleMessages.length === 0 ? (
           <div className="text-center text-gray-500 mt-20 font-handwriting text-2xl">Opening the mailbox...</div>
         ) : visibleMessages.length === 0 ? (
@@ -488,10 +515,10 @@ export default function Home({ user, onSignOut }) {
           label="Inbox"
           icon={Inbox}
           badge={unreadCount}
-          active={filter === 'all' || filter === 'unread'}
+          active={filter === 'all' || filter === 'unread' || filter === 'sent'}
           onClick={() => setFilter('all')}
         />
-        <NavBtn label="Sent" icon={Send} active={filter === 'sent'} onClick={() => setFilter('sent')} />
+        <NavBtn label="Profiles" icon={Users} active={filter === 'profiles'} onClick={() => setFilter('profiles')} />
 
         <button
           onClick={openCompose}
@@ -507,14 +534,17 @@ export default function Home({ user, onSignOut }) {
 
       {isComposing && (
         <ComposeMessage
-          key={replyTo ? `reply-${replyTo.id}` : 'new'}
+          key={replyTo ? `reply-${replyTo.id}` : composeTo ? `to-${composeTo.id}` : 'new'}
           user={user}
           profile={profile}
           replyTo={replyTo}
+          to={composeTo}
           onClose={closeCompose}
           onSent={handleMessageSent}
         />
       )}
+
+      {viewProfile && <ProfileSheet profile={viewProfile} onClose={() => setViewProfile(null)} onWrite={writeTo} />}
 
       {showProfile && (
         <ProfileSettings

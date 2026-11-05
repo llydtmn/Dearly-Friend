@@ -1,7 +1,7 @@
 import { supabase } from '../supabaseClient';
 
 const AVATARS = 'avatars';
-const COLUMNS = 'id, email, name, avatar_path, default_signature';
+const COLUMNS = 'id, email, name, avatar_path, default_signature, bio';
 
 export const avatarUrl = (path) =>
   path ? supabase.storage.from(AVATARS).getPublicUrl(path).data.publicUrl : null;

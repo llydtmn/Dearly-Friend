@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { Trash2, Star, Paperclip } from 'lucide-react';
+import { Trash2, Star, Paperclip, Mic } from 'lucide-react';
 
 const ACTION_WIDTH = 88;
 
@@ -140,6 +140,7 @@ export default function MessageCard({
           </p>
         </div>
         <span style={glow} className="font-sans text-xs text-gray-300 shrink-0 flex items-center gap-2">
+          {message.voicePath && <Mic size={13} aria-label="Has a voice message" />}
           {message.attachments?.length > 0 && <Paperclip size={13} aria-label="Has photos" />}
           {isStarred && <Star size={13} className="fill-amber-400 text-amber-400" aria-label="Keepsake" />}
           {date}
