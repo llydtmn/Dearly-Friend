@@ -41,11 +41,11 @@ export default function ScheduledList() {
   };
 
   if (items === null) {
-    return <div className="text-center text-gray-500 mt-20 font-handwriting text-2xl">Checking the post office...</div>;
+    return <div className="text-center text-gray-300 mt-20 font-handwriting text-2xl">Checking the post office...</div>;
   }
   if (items.length === 0) {
     return (
-      <div className="text-center text-gray-500 mt-20 px-6 font-handwriting text-2xl">
+      <div className="text-center text-gray-300 mt-20 px-6 font-handwriting text-2xl">
         Nothing scheduled yet. Tap + and switch on “Schedule for later”.
       </div>
     );
