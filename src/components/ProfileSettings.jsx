@@ -6,6 +6,7 @@ import { compressImage } from '../utils/image';
 import { avatarUrl, updateMyProfile, uploadAvatar, removeAvatarFile } from '../services/profileService';
 import { getBlockedSenders, unblockSender } from '../services/emailBlockService';
 import DeleteAccount from './DeleteAccount';
+import NotificationSettings from './NotificationSettings';
 
 const BIO_MAX = 200;
 
@@ -185,6 +186,8 @@ export default function ProfileSettings({ user, profile, onClose, onSaved, onAcc
               </span>
             </span>
           </label>
+
+          <NotificationSettings />
 
           {blocked.length > 0 && (
             <div>

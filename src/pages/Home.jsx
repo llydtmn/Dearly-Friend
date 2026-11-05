@@ -14,6 +14,7 @@ import {
   PAGE_SIZE,
 } from '../services/messageService';
 import { getMyProfile, avatarUrl } from '../services/profileService';
+import { syncPush, forgetPushOnThisDevice } from '../services/pushService';
 import { useToast } from '../components/Toast';
 import MessageCard from '../components/MessageCard';
 import ComposeMessage from '../components/ComposeMessage';
@@ -196,6 +197,20 @@ export default function Home({ user, onSignOut }) {
       .then((ids) => setKeepsakeIds(new Set(ids)))
       .catch((err) => console.error('Failed to load keepsakes:', err));
   }, [user.id]);
+
+  // If this device already allowed notifications, keep it linked to the signed-in account
+  useEffect(() => {
+    syncPush().catch((err) => console.warn('Push sync failed:', err));
+  }, [user.id]);
+
+  const handleSignOut = async () => {
+    try {
+      await forgetPushOnThisDevice();
+    } catch {
+      /* best effort: never block signing out */
+    }
+    onSignOut();
+  };
 
   /* ---------- Live inbox ---------- */
 
@@ -414,7 +429,7 @@ export default function Home({ user, onSignOut }) {
           <button onClick={openCompose} aria-label="Write a letter" className="hidden md:block text-gray-300 hover:text-paper transition-colors p-2">
             <Plus size={24} />
           </button>
-          <button onClick={onSignOut} title="Sign out" className="text-gray-300 hover:text-paper transition-colors p-2">
+          <button onClick={handleSignOut} title="Sign out" className="text-gray-300 hover:text-paper transition-colors p-2">
             <LogOut size={20} />
           </button>
         </div>
@@ -464,9 +479,9 @@ export default function Home({ user, onSignOut }) {
             onSelect={openProfile}
           />
         ) : loading && visibleMessages.length === 0 ? (
-          <div className="text-center text-gray-300 mt-20 font-handwriting text-2xl">Opening the mailbox...</div>
+          <div className="text-center text-gray-500 mt-20 font-handwriting text-2xl">Opening the mailbox...</div>
         ) : visibleMessages.length === 0 ? (
-          <div className="text-center text-gray-300 mt-20 px-6 font-handwriting text-2xl">
+          <div className="text-center text-gray-500 mt-20 px-6 font-handwriting text-2xl">
             {debouncedSearch ? 'No letters match your search.' : EMPTY_TEXT[filter]}
           </div>
         ) : (
