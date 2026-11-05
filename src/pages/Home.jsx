@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Search, Plus, User, LogOut, Inbox, Users, Star, Clock, Trash2 } from 'lucide-react';
+import { Search, Plus, User, LogOut, Inbox, Users, Star, Clock, ArrowLeft } from 'lucide-react';
 import {
   getMessages,
   getMessage,
@@ -7,6 +7,7 @@ import {
   markAsRead,
   deleteMessage,
   deleteMessageForEveryone,
+  archiveMessage,
   subscribeToMessages,
   getKeepsakeIds,
   getUnreadCount,
@@ -27,6 +28,7 @@ import ProfilesList from '../components/ProfilesList';
 import ProfileSheet from '../components/ProfileSheet';
 import OfflineBanner from '../components/OfflineBanner';
 import DeletedLetters from '../components/DeletedLetters';
+import HeaderMenu from '../components/HeaderMenu';
 import { useOutbox } from '../hooks/useOutbox';
 
 const TABS = [
@@ -43,6 +45,7 @@ const EMPTY_TEXT = {
   unread: 'No unread letters.',
   sent: "You haven't sent any letters yet.",
   keepsakes: 'Star a letter to keep it here.',
+  archive: 'Nothing archived. Swipe a letter to the right to archive it.',
 };
 
 // Same rules the database applies, used to keep the visible list in step with live changes
@@ -50,9 +53,10 @@ const matchesView = (msg, { filter, term, keepsakeIds }, myEmail) => {
   if (filter === 'scheduled' || filter === 'profiles') return false;
   const sent = msg.senderEmail.toLowerCase() === myEmail;
   if (sent ? msg.deletedBySender : msg.deletedByRecipient) return false; // I removed my copy
+  const archivedForMe = sent ? msg.archivedBySender : msg.archivedByRecipient;
+  if (filter === 'archive' ? !archivedForMe : archivedForMe) return false; // archived letters only show in Archive
   if (filter === 'unread' && (msg.isRead || sent)) return false;
   if (filter === 'sent' && !sent) return false;
-  if (filter === 'all' && sent) return false;
   if (filter === 'keepsakes' && !keepsakeIds.has(msg.id)) return false;
   if (term) {
     return (
@@ -96,6 +100,7 @@ export default function Home({ user, onSignOut }) {
   const [activeMessage, setActiveMessage] = useState(null);
   const [isEnvelopeOpen, setIsEnvelopeOpen] = useState(false);
   const [swipedId, setSwipedId] = useState(null);
+  const [swipedSide, setSwipedSide] = useState(null);
   const [scheduledVersion, setScheduledVersion] = useState(0);
   const [unreadCount, setUnreadCount] = useState(0);
 
@@ -238,8 +243,10 @@ export default function Home({ user, onSignOut }) {
       onUpdate: (msg) => {
         const sentByMe = msg.senderEmail?.toLowerCase() === myEmail;
         const hiddenForMe = sentByMe ? msg.deletedBySender : msg.deletedByRecipient;
+        const archivedForMe = sentByMe ? msg.archivedBySender : msg.archivedByRecipient;
+        const wrongView = viewRef.current.filter === 'archive' ? !archivedForMe : archivedForMe;
         setMessages((prev) =>
-          hiddenForMe ? prev.filter((m) => m.id !== msg.id) : prev.map((m) => (m.id === msg.id ? msg : m))
+          hiddenForMe || wrongView ? prev.filter((m) => m.id !== msg.id) : prev.map((m) => (m.id === msg.id ? msg : m))
         );
         refreshUnreadRef.current();
       },
@@ -351,6 +358,25 @@ export default function Home({ user, onSignOut }) {
     }
   };
 
+  // Archive / unarchive MY copy (the other person is not affected)
+  const handleArchive = async (msg) => {
+    const sent = msg.senderEmail.toLowerCase() === myEmail;
+    const wasArchived = sent ? msg.archivedBySender : msg.archivedByRecipient;
+    try {
+      await archiveMessage(msg.id, !wasArchived);
+      setMessages((prev) => prev.filter((m) => m.id !== msg.id)); // it moves to the other view
+      setActiveMessage((cur) => (cur?.id === msg.id ? null : cur));
+      setSwipedId(null);
+      setSwipedSide(null);
+      refreshUnread();
+      toast.success(wasArchived ? 'Moved back out of Archive.' : 'Letter archived.');
+    } catch (err) {
+      console.error('Failed to archive message:', err);
+      toast.error("Couldn't update the archive. Please try again.");
+      throw err;
+    }
+  };
+
   const toggleKeepsake = async (msg) => {
     const had = keepsakeIds.has(msg.id);
     const flip = (add) =>
@@ -437,7 +463,7 @@ export default function Home({ user, onSignOut }) {
     <div className="min-h-screen flex flex-col relative overflow-hidden">
       <OfflineBanner outbox={outbox} />
       <div
-        className="p-4 flex justify-between items-center border-b border-gray-700/50 z-10 bg-charcoal/80 backdrop-blur-md sticky top-0"
+        className="p-4 flex justify-between items-center border-b border-gray-700/50 z-30 bg-charcoal/80 backdrop-blur-md sticky top-0"
         style={{ top: outbox.visible ? '2.25rem' : 0 }}
       >
         <div className="flex items-center gap-3">
@@ -468,14 +494,11 @@ export default function Home({ user, onSignOut }) {
           <button onClick={openCompose} aria-label="Write a letter" className="hidden md:block text-gray-300 hover:text-paper transition-colors p-2">
             <Plus size={24} />
           </button>
-          <button
-            onClick={() => setShowDeleted(true)}
-            title="Deleted letters"
-            aria-label="Deleted letters"
-            className="text-gray-300 hover:text-paper transition-colors p-2"
-          >
-            <Trash2 size={20} />
-          </button>
+          <HeaderMenu
+            onHistory={() => setShowDeleted(true)}
+            onArchive={() => setFilter('archive')}
+            archiveActive={filter === 'archive'}
+          />
           <button onClick={handleSignOut} title="Sign out" className="text-gray-300 hover:text-paper transition-colors p-2">
             <LogOut size={20} />
           </button>
@@ -493,6 +516,18 @@ export default function Home({ user, onSignOut }) {
           </button>
         ))}
       </div>
+
+      {filter === 'archive' && (
+        <div className="px-4 py-2 flex items-center gap-3 text-sm font-sans z-10 bg-charcoal/80 backdrop-blur-md border-b border-gray-800">
+          <button
+            onClick={() => setFilter('all')}
+            className="flex items-center gap-1 text-gray-300 hover:text-paper transition-colors"
+          >
+            <ArrowLeft size={16} /> Back
+          </button>
+          <span className="text-paper font-semibold">Archive</span>
+        </div>
+      )}
 
       {/* Mobile only: All / Unread / Sent switch (the bottom bar replaces the tab row) */}
       {(filter === 'all' || filter === 'unread' || filter === 'sent') && (
@@ -516,6 +551,8 @@ export default function Home({ user, onSignOut }) {
       )}
 
       <div className="flex-1 overflow-y-auto z-10 relative pb-28 md:pb-0">
+        {/* "All" also shows letters still waiting to be delivered */}
+        {filter === 'all' && !debouncedSearch && <ScheduledList embedded key={`all-${scheduledVersion}`} />}
         {filter === 'scheduled' ? (
           <ScheduledList key={scheduledVersion} />
         ) : filter === 'profiles' ? (
@@ -546,10 +583,15 @@ export default function Home({ user, onSignOut }) {
                   isStarred={keepsakeIds.has(msg.id)}
                   onClick={() => handleMessageClick(msg)}
                   isActive={activeMessage?.id === msg.id}
-                  isOpen={swipedId === msg.id}
-                  onOpen={() => setSwipedId(msg.id)}
+                  openSide={swipedId === msg.id ? swipedSide : null}
+                  onOpen={(side) => {
+                    setSwipedId(msg.id);
+                    setSwipedSide(side);
+                  }}
                   onClose={() => setSwipedId((cur) => (cur === msg.id ? null : cur))}
                   onDelete={(scope) => handleDelete(msg, scope)}
+                  onArchive={() => handleArchive(msg)}
+                  isArchived={filter === 'archive'}
                 />
               );
             })}

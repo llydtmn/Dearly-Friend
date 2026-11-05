@@ -18,6 +18,8 @@ export const fromRow = (r) => ({
   date: r.created_at,
   deletedBySender: !!r.deleted_by_sender,
   deletedByRecipient: !!r.deleted_by_recipient,
+  archivedBySender: !!r.archived_by_sender,
+  archivedByRecipient: !!r.archived_by_recipient,
 });
 
 // Keep user input from breaking PostgREST's filter syntax
@@ -33,12 +35,20 @@ export const getMessages = async ({ filter = 'all', search = '', myEmail, before
     .from('messages')
     .select(filter === 'keepsakes' ? '*, keepsakes!inner(message_id)' : '*');
 
-  // Each person only sees letters they haven't removed from their own mailbox
-  if (filter === 'sent') q = q.eq('sender_email', myEmail).eq('deleted_by_sender', false);
-  else if (filter === 'all' || filter === 'unread') q = q.neq('sender_email', myEmail).eq('deleted_by_recipient', false);
-  else {
+  // Each person only sees letters they haven't removed from their own mailbox.
+  // Archived letters live in the Archive view only.
+  if (filter === 'archive') {
     q = q.or(
-      `and(sender_email.eq.${myEmail},deleted_by_sender.eq.false),and(recipient_email.eq.${myEmail},deleted_by_recipient.eq.false)`
+      `and(sender_email.eq.${myEmail},deleted_by_sender.eq.false,archived_by_sender.eq.true),and(recipient_email.eq.${myEmail},deleted_by_recipient.eq.false,archived_by_recipient.eq.true)`
+    );
+  } else if (filter === 'sent') {
+    q = q.eq('sender_email', myEmail).eq('deleted_by_sender', false).eq('archived_by_sender', false);
+  } else if (filter === 'unread') {
+    q = q.neq('sender_email', myEmail).eq('deleted_by_recipient', false).eq('archived_by_recipient', false);
+  } else {
+    // 'all' and 'keepsakes': every letter I received or sent
+    q = q.or(
+      `and(sender_email.eq.${myEmail},deleted_by_sender.eq.false,archived_by_sender.eq.false),and(recipient_email.eq.${myEmail},deleted_by_recipient.eq.false,archived_by_recipient.eq.false)`
     );
   }
   if (filter === 'unread') q = q.eq('is_read', false);
@@ -125,6 +135,12 @@ export const deleteMessageForEveryone = async (msg) => {
   if (error) throw error;
   await removeAttachments(msg.attachments);
   await removeVoice(msg.voicePath);
+};
+
+// Moves the letter into (or out of) MY Archive. The other person's copy is untouched.
+export const archiveMessage = async (id, archived = true) => {
+  const { error } = await supabase.rpc('archive_message_for_me', { p_id: id, p_archived: archived });
+  if (error) throw error;
 };
 
 /* ---------- Deleted letters (my removed copies, which I can bring back) ---------- */
@@ -299,6 +315,7 @@ export const getUnreadCount = async (myEmail) => {
     .select('id', { count: 'exact', head: true })
     .neq('sender_email', myEmail)
     .eq('deleted_by_recipient', false)
+    .eq('archived_by_recipient', false)
     .eq('is_read', false);
   if (error) throw error;
   return count ?? 0;

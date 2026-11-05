@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Trash2, Star, Paperclip, Mic } from 'lucide-react';
+import { Trash2, Star, Paperclip, Mic, Archive, ArchiveRestore } from 'lucide-react';
 
 const ACTION_WIDTH = 88;
 
@@ -9,10 +9,12 @@ export default function MessageCard({
   onClick,
   isActive,
   currentEmail,
-  isOpen = false,
+  openSide = null, // 'delete' (swiped left) | 'archive' (swiped right) | null
   onOpen,
   onClose,
   onDelete,
+  onArchive,
+  isArchived = false,
   avatarUrl = null,
   initial = '',
   isStarred = false,
@@ -27,10 +29,13 @@ export default function MessageCard({
   const [deleting, setDeleting] = useState(false);
   const [choosing, setChoosing] = useState(false);
 
-  const offset = drag ?? (isOpen ? -ACTION_WIDTH : 0);
+  const isOpen = openSide !== null;
+  const restOffset = openSide === 'delete' ? -ACTION_WIDTH : openSide === 'archive' ? ACTION_WIDTH : 0;
+  const offset = drag ?? restOffset;
+  const [archiving, setArchiving] = useState(false);
 
   const handlePointerDown = (e) => {
-    start.current = { x: e.clientX, y: e.clientY, base: isOpen ? -ACTION_WIDTH : 0 };
+    start.current = { x: e.clientX, y: e.clientY, base: restOffset };
     moved.current = false;
   };
 
@@ -44,13 +49,15 @@ export default function MessageCard({
       moved.current = true;
       e.currentTarget.setPointerCapture(e.pointerId);
     }
-    setDrag(Math.max(-ACTION_WIDTH - 24, Math.min(0, start.current.base + dx)));
+    setDrag(Math.max(-ACTION_WIDTH - 24, Math.min(ACTION_WIDTH + 24, start.current.base + dx)));
   };
 
   const handlePointerUp = () => {
     if (!start.current) return;
     if (moved.current && drag !== null) {
-      drag < -ACTION_WIDTH / 2 ? onOpen?.() : onClose?.();
+      if (drag < -ACTION_WIDTH / 2) onOpen?.('delete');
+      else if (drag > ACTION_WIDTH / 2) onOpen?.('archive');
+      else onClose?.();
     }
     setDrag(null);
     start.current = null;
@@ -71,6 +78,19 @@ export default function MessageCard({
       return;
     }
     onClick?.();
+  };
+
+  const handleArchive = async (e) => {
+    e.stopPropagation();
+    if (archiving) return;
+    setArchiving(true);
+    try {
+      await onArchive?.();
+    } catch {
+      /* the parent already shows an error toast */
+    } finally {
+      setArchiving(false);
+    }
   };
 
   const runDelete = async (scope) => {
@@ -117,10 +137,23 @@ export default function MessageCard({
       >
         <button
           type="button"
+          onClick={handleArchive}
+          disabled={archiving}
+          aria-label={isArchived ? 'Unarchive message' : 'Archive message'}
+          tabIndex={openSide === 'archive' ? 0 : -1}
+          style={{ width: ACTION_WIDTH }}
+          className="absolute top-0 bottom-0 right-full flex flex-col items-center justify-center gap-1 bg-blue-600 text-white text-xs font-medium active:bg-blue-700 disabled:opacity-60"
+        >
+          {isArchived ? <ArchiveRestore size={20} /> : <Archive size={20} />}
+          {archiving ? '...' : isArchived ? 'Unarchive' : 'Archive'}
+        </button>
+
+        <button
+          type="button"
           onClick={handleDelete}
           disabled={deleting}
           aria-label="Delete message"
-          tabIndex={isOpen ? 0 : -1}
+          tabIndex={openSide === 'delete' ? 0 : -1}
           style={{ width: ACTION_WIDTH }}
           className="absolute top-0 bottom-0 left-full flex flex-col items-center justify-center gap-1 bg-red-600 text-white text-xs font-medium active:bg-red-700 disabled:opacity-60"
         >

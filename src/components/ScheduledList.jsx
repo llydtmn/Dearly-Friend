@@ -5,7 +5,8 @@ import { useToast } from './Toast';
 
 const when = (iso) => new Date(iso).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
 
-export default function ScheduledList() {
+// embedded: shown at the top of "All" — no loading/empty messages, just a small heading when there is something scheduled
+export default function ScheduledList({ embedded = false }) {
   const toast = useToast();
   const [items, setItems] = useState(null);
   const [busyId, setBusyId] = useState(null);
@@ -40,6 +41,8 @@ export default function ScheduledList() {
     }
   };
 
+  if (embedded && (items === null || items.length === 0)) return null;
+
   if (items === null) {
     return <div className="text-center text-gray-300 mt-20 font-handwriting text-2xl">Checking the post office...</div>;
   }
@@ -51,7 +54,14 @@ export default function ScheduledList() {
     );
   }
 
-  return items.map((x) => (
+  return (
+    <>
+      {embedded && (
+        <div className="px-4 pt-3 pb-1 text-xs font-sans uppercase tracking-wide text-gray-400 flex items-center gap-1.5">
+          <Clock size={12} /> Scheduled
+        </div>
+      )}
+      {items.map((x) => (
     <div key={x.id} className="flex items-center justify-between gap-3 px-4 py-4 border-b border-gray-700/60">
       <div className="min-w-0 font-sans" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.95)' }}>
         <p className="text-[15px] text-gray-50 break-words">
@@ -78,5 +88,7 @@ export default function ScheduledList() {
         {busyId === x.id ? 'Cancelling...' : 'Cancel'}
       </button>
     </div>
-  ));
+  ))}
+    </>
+  );
 }
