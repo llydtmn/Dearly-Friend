@@ -1,10 +1,19 @@
 import { useState, useEffect, useRef } from 'react';
-import { X } from 'lucide-react';
+import { X, ImagePlus, Clock } from 'lucide-react';
 import RecipientSelector from './RecipientSelector';
-import { sendMessage, getProfiles } from '../services/messageService';
+import {
+  sendMessage,
+  getProfiles,
+  scheduleLetter,
+  uploadAttachments,
+  removeAttachments,
+} from '../services/messageService';
+import { compressImage } from '../utils/image';
 import { useToast } from './Toast';
 
 const DEFAULT_GREETING = 'Dear, [Name]';
+const MAX_PHOTOS = 4;
+const MAX_FILE_BYTES = 20 * 1024 * 1024;
 
 const readDraft = (key) => {
   try {
@@ -18,13 +27,27 @@ const readDraft = (key) => {
 // A draft isn't worth keeping if nothing was written and the recipients are just the starting ones
 const isBlank = (d, baseEmail) =>
   !d.content.trim() &&
-  (baseEmail
-    ? d.recipients.length === 1 && d.recipients[0].email === baseEmail
-    : d.recipients.length === 0);
+  (baseEmail ? d.recipients.length === 1 && d.recipients[0].email === baseEmail : d.recipients.length === 0);
 
-export default function ComposeMessage({ user, replyTo = null, onClose, onSent }) {
+// <input type="datetime-local"> wants local time as YYYY-MM-DDTHH:mm
+const toLocalInput = (date) => {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+};
+
+const defaultDeliveryTime = () => {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  d.setHours(9, 0, 0, 0);
+  return toLocalInput(d);
+};
+
+const prettyWhen = (value) =>
+  new Date(value).toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short' });
+
+export default function ComposeMessage({ user, profile = null, replyTo = null, onClose, onSent }) {
   const toast = useToast();
-  const myName = user.user_metadata?.name || user.email.split('@')[0];
+  const myName = profile?.name || user.user_metadata?.name || user.email.split('@')[0];
 
   // One draft slot for new letters, and one per letter being replied to
   const draftKey = replyTo ? `dearly_draft_reply_${replyTo.id}_${user.id}` : `dearly_draft_new_${user.id}`;
@@ -33,22 +56,20 @@ export default function ComposeMessage({ user, replyTo = null, onClose, onSent }
   const replyGuessName = replyEmail ? replyEmail.split('@')[0] : '';
   const defaults = {
     greeting: replyTo ? `Dear, ${replyGuessName}` : DEFAULT_GREETING,
-    signature: `- ${myName}`,
+    signature: profile?.default_signature || `- ${myName}`,
   };
 
   // Restore a saved draft once, on first render
   const [initial] = useState(() => {
     const saved = readDraft(draftKey);
     if (saved && typeof saved === 'object') {
+      const savedRecipients = Array.isArray(saved.recipients) ? saved.recipients : [];
       return {
-        recipients: Array.isArray(saved.recipients) ? saved.recipients : [],
+        recipients: savedRecipients,
         greeting: saved.greeting ?? defaults.greeting,
         content: saved.content ?? '',
         signature: saved.signature ?? defaults.signature,
-        restored: !isBlank(
-          { content: saved.content ?? '', recipients: Array.isArray(saved.recipients) ? saved.recipients : [] },
-          replyEmail
-        ),
+        restored: !isBlank({ content: saved.content ?? '', recipients: savedRecipients }, replyEmail),
       };
     }
     return {
@@ -66,9 +87,26 @@ export default function ComposeMessage({ user, replyTo = null, onClose, onSent }
   const [content, setContent] = useState(initial.content);
   const [signature, setSignature] = useState(initial.signature);
   const [restored, setRestored] = useState(initial.restored);
+  const [photos, setPhotos] = useState([]); // [{ id, file, url }]
+  const [scheduleOn, setScheduleOn] = useState(false);
+  const [deliverAt, setDeliverAt] = useState('');
+  const [occasion, setOccasion] = useState('');
+  const [repeatYearly, setRepeatYearly] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [sending, setSending] = useState(false);
+  const [stage, setStage] = useState('');
   const sentRef = useRef(false);
+  const fileRef = useRef(null);
+  const photosRef = useRef([]);
+  photosRef.current = photos;
+
+  // Free the preview URLs when the window closes
+  useEffect(
+    () => () => {
+      photosRef.current.forEach((p) => URL.revokeObjectURL(p.url));
+    },
+    []
+  );
 
   useEffect(() => {
     getProfiles()
@@ -80,18 +118,18 @@ export default function ComposeMessage({ user, replyTo = null, onClose, onSent }
   // When replying, swap the guessed name for the friend's real profile name once it loads
   useEffect(() => {
     if (!replyEmail || friends.length === 0) return;
-    const profile = friends.find((f) => f.email.toLowerCase() === replyEmail);
-    if (!profile?.name || profile.name === replyGuessName) return;
+    const profileMatch = friends.find((f) => f.email.toLowerCase() === replyEmail);
+    if (!profileMatch?.name || profileMatch.name === replyGuessName) return;
     setRecipients((prev) =>
       prev.map((r) =>
-        r.email === replyEmail && r.name === replyGuessName ? { ...r, id: profile.id, name: profile.name } : r
+        r.email === replyEmail && r.name === replyGuessName ? { ...r, id: profileMatch.id, name: profileMatch.name } : r
       )
     );
-    setGreeting((g) => (g === `Dear, ${replyGuessName}` ? `Dear, ${profile.name}` : g));
+    setGreeting((g) => (g === `Dear, ${replyGuessName}` ? `Dear, ${profileMatch.name}` : g));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [friends]);
 
-  // Draft autosave (debounced). Cleared on send; removed when there's nothing worth keeping.
+  // Draft autosave (debounced). Photos and schedule settings aren't kept in drafts.
   useEffect(() => {
     if (sentRef.current) return;
     const timer = setTimeout(() => {
@@ -107,7 +145,7 @@ export default function ComposeMessage({ user, replyTo = null, onClose, onSent }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recipients, greeting, content, signature, draftKey]);
 
-  // Flush immediately if the tab is hidden or closed, so the last keystrokes aren't lost
+  // Flush immediately if the tab is hidden, closed, or this window unmounts
   const latest = useRef({});
   latest.current = { recipients, greeting, content, signature };
   useEffect(() => {
@@ -125,7 +163,7 @@ export default function ComposeMessage({ user, replyTo = null, onClose, onSent }
     document.addEventListener('visibilitychange', onHide);
     window.addEventListener('pagehide', flush);
     return () => {
-      flush(); // also saves when the compose window is closed within the debounce delay
+      flush();
       document.removeEventListener('visibilitychange', onHide);
       window.removeEventListener('pagehide', flush);
     };
@@ -145,38 +183,117 @@ export default function ComposeMessage({ user, replyTo = null, onClose, onSent }
     setRestored(false);
   };
 
-  const canSend = recipients.length > 0 && content.trim() && !sending;
+  /* ---------- Photos ---------- */
+
+  const addPhotos = (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (files.length === 0) return;
+
+    const valid = files.filter((f) => f.type.startsWith('image/') && f.size <= MAX_FILE_BYTES);
+    if (valid.length < files.length) toast.error('Some files were skipped. Only images under 20 MB can be attached.');
+
+    const room = MAX_PHOTOS - photos.length;
+    if (valid.length > room) toast.info(`You can attach up to ${MAX_PHOTOS} photos to a letter.`);
+
+    const added = valid.slice(0, Math.max(room, 0)).map((file) => ({
+      id: crypto.randomUUID(),
+      file,
+      url: URL.createObjectURL(file),
+    }));
+    setPhotos((prev) => [...prev, ...added]);
+  };
+
+  const removePhoto = (id) => {
+    setPhotos((prev) => {
+      const gone = prev.find((p) => p.id === id);
+      if (gone) URL.revokeObjectURL(gone.url);
+      return prev.filter((p) => p.id !== id);
+    });
+  };
+
+  /* ---------- Scheduling ---------- */
+
+  const toggleSchedule = (e) => {
+    const on = e.target.checked;
+    setScheduleOn(on);
+    if (on && !deliverAt) setDeliverAt(defaultDeliveryTime());
+  };
+
+  const deliverTime = deliverAt ? new Date(deliverAt).getTime() : NaN;
+  const scheduleValid = !scheduleOn || (Number.isFinite(deliverTime) && deliverTime > Date.now() + 30 * 1000);
+  const canSend = recipients.length > 0 && content.trim() && scheduleValid && !sending;
+
+  /* ---------- Send / schedule ---------- */
 
   const handleSend = async () => {
     if (!canSend) return;
     setSending(true);
+    setStage(photos.length ? 'Uploading photos...' : '');
+    let paths = [];
     try {
-      await Promise.all(
-        recipients.map((r) =>
-          sendMessage({
+      if (photos.length) {
+        const blobs = await Promise.all(photos.map((p) => compressImage(p.file, { maxSize: 1600, quality: 0.82 })));
+        paths = await uploadAttachments(user.id, blobs);
+      }
+      setStage('');
+
+      const deliverIso = scheduleOn ? new Date(deliverAt).toISOString() : null;
+      const results = await Promise.allSettled(
+        recipients.map((r) => {
+          const base = {
             senderId: user.id,
             senderEmail: user.email.toLowerCase(),
             recipientEmail: r.email,
             greeting: greeting.replace('[Name]', r.name),
             content,
             signature,
-          })
-        )
+            attachments: paths,
+          };
+          return scheduleOn
+            ? scheduleLetter({ ...base, deliverAt: deliverIso, occasion: occasion.trim(), repeatYearly })
+            : sendMessage(base);
+        })
       );
-      sentRef.current = true;
-      try {
-        localStorage.removeItem(draftKey);
-      } catch {
-        /* ignore */
+
+      const failed = recipients.filter((_, i) => results[i].status === 'rejected');
+
+      if (failed.length === 0) {
+        sentRef.current = true;
+        try {
+          localStorage.removeItem(draftKey);
+        } catch {
+          /* ignore */
+        }
+        onSent(recipients.length, scheduleOn ? { scheduled: true, deliverAt: deliverIso } : undefined);
+        return;
       }
-      onSent(recipients.length);
+
+      if (failed.length === recipients.length) {
+        await removeAttachments(paths);
+        throw results.find((r) => r.status === 'rejected').reason;
+      }
+
+      // Some went out, some didn't: keep only the ones that failed so a retry can't double-send
+      setRecipients(failed);
+      toast.error(
+        `${scheduleOn ? 'Scheduled' : 'Sent'} to ${recipients.length - failed.length}, but not to ${failed
+          .map((f) => f.email)
+          .join(', ')}. They're still in the To: field so you can try again.`
+      );
+      setConfirming(false);
+      setSending(false);
     } catch (err) {
       console.error('Failed to send letter:', err);
-      toast.error(`Your letter wasn't sent: ${err.message || 'something went wrong'}. Your draft is safe.`);
+      toast.error(
+        `Your letter wasn't ${scheduleOn ? 'scheduled' : 'sent'}: ${err.message || 'something went wrong'}. Your draft is safe.`
+      );
       setConfirming(false);
       setSending(false);
     }
   };
+
+  const noun = scheduleOn ? 'schedule' : 'send';
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex justify-center items-center p-4 animate-fade-in">
@@ -226,6 +343,82 @@ export default function ComposeMessage({ user, replyTo = null, onClose, onSent }
               className="w-full bg-transparent border-b border-ink/20 focus:border-heart outline-none font-handwriting text-2xl text-right placeholder-ink/40 pb-1"
             />
           </div>
+
+          {/* Extras: photos + scheduling */}
+          <div className="mt-6 pt-4 border-t border-ink/10 space-y-3 font-sans text-sm">
+            <div className="flex items-center gap-x-5 gap-y-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                disabled={photos.length >= MAX_PHOTOS}
+                className="flex items-center gap-2 px-3 py-1.5 border border-ink/20 rounded-sm hover:border-heart hover:text-heart transition-colors disabled:opacity-40 disabled:hover:border-ink/20 disabled:hover:text-ink"
+              >
+                <ImagePlus size={16} /> Add photo
+              </button>
+              <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={addPhotos} />
+
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input type="checkbox" checked={scheduleOn} onChange={toggleSchedule} className="accent-heart" />
+                <Clock size={16} /> Schedule for later
+              </label>
+            </div>
+
+            {photos.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {photos.map((p) => (
+                  <div key={p.id} className="relative w-20 h-20 rounded-sm overflow-hidden border border-ink/20">
+                    <img src={p.url} alt="Attached" className="w-full h-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => removePhoto(p.id)}
+                      aria-label="Remove photo"
+                      className="absolute top-0.5 right-0.5 bg-black/60 text-white rounded-full p-0.5 hover:bg-black/80"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {scheduleOn && (
+              <div className="space-y-2 bg-ink/5 rounded-sm p-3">
+                <div className="flex flex-wrap gap-3">
+                  <label className="flex flex-col gap-1">
+                    <span className="text-xs text-ink/60">Arrives on</span>
+                    <input
+                      type="datetime-local"
+                      value={deliverAt}
+                      min={toLocalInput(new Date(Date.now() + 60 * 1000))}
+                      onChange={(e) => setDeliverAt(e.target.value)}
+                      className="bg-transparent border border-ink/20 rounded-sm px-2 py-1 text-ink outline-none focus:border-heart"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 flex-1 min-w-[10rem]">
+                    <span className="text-xs text-ink/60">Occasion (optional)</span>
+                    <input
+                      type="text"
+                      value={occasion}
+                      onChange={(e) => setOccasion(e.target.value)}
+                      maxLength={40}
+                      placeholder="Birthday, anniversary..."
+                      className="bg-transparent border border-ink/20 rounded-sm px-2 py-1 text-ink outline-none focus:border-heart placeholder-ink/30"
+                    />
+                  </label>
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={repeatYearly}
+                    onChange={(e) => setRepeatYearly(e.target.checked)}
+                    className="accent-heart"
+                  />
+                  Send again every year
+                </label>
+                {!scheduleValid && <p className="text-heart text-xs">Pick a time in the future.</p>}
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="p-4 border-t border-ink/10 flex justify-end bg-paper-dark/20">
@@ -234,7 +427,7 @@ export default function ComposeMessage({ user, replyTo = null, onClose, onSent }
             disabled={!canSend}
             className="bg-heart text-paper px-6 py-2 rounded-sm font-sans text-sm tracking-wide hover:bg-red-900 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Send Now →
+            {scheduleOn ? 'Schedule →' : 'Send Now →'}
           </button>
         </div>
 
@@ -247,15 +440,28 @@ export default function ComposeMessage({ user, replyTo = null, onClose, onSent }
           >
             <div className="bg-paper w-full max-w-sm rounded-sm shadow-2xl p-6 text-ink font-sans">
               <h3 id="confirm-send-title" className="font-handwriting text-2xl mb-3">
-                {recipients.length === 1 ? 'Send to this address?' : `Send to these ${recipients.length} addresses?`}
+                {recipients.length === 1
+                  ? `${scheduleOn ? 'Schedule' : 'Send'} to this address?`
+                  : `${scheduleOn ? 'Schedule' : 'Send'} to these ${recipients.length} addresses?`}
               </h3>
-              <ul className="mb-4 space-y-1">
+              <ul className="mb-3 space-y-1">
                 {recipients.map((r) => (
                   <li key={r.email} className="text-sm font-semibold break-all">
                     {r.email}
                   </li>
                 ))}
               </ul>
+              {scheduleOn && (
+                <p className="text-sm mb-2">
+                  Arrives {prettyWhen(deliverAt)}
+                  {repeatYearly ? ', then every year' : ''}.
+                </p>
+              )}
+              {photos.length > 0 && (
+                <p className="text-sm mb-2">
+                  Includes {photos.length} photo{photos.length > 1 ? 's' : ''}.
+                </p>
+              )}
               <p className="text-xs text-ink/60 mb-5">
                 Double-check the spelling. A private letter can't be unsent once it's delivered.
               </p>
@@ -275,7 +481,7 @@ export default function ComposeMessage({ user, replyTo = null, onClose, onSent }
                   disabled={sending}
                   className="bg-heart text-paper px-5 py-2 rounded-sm text-sm tracking-wide hover:bg-red-900 transition-colors disabled:opacity-50"
                 >
-                  {sending ? 'Sending...' : 'Yes, send'}
+                  {sending ? stage || (scheduleOn ? 'Scheduling...' : 'Sending...') : `Yes, ${noun}`}
                 </button>
               </div>
             </div>

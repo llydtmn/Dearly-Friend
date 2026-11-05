@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { Trash2 } from 'lucide-react';
+import { Trash2, Star, Paperclip } from 'lucide-react';
 
 const ACTION_WIDTH = 88;
 
@@ -12,6 +12,9 @@ export default function MessageCard({
   onOpen,
   onClose,
   onDelete,
+  avatarUrl = null,
+  initial = '',
+  isStarred = false,
 }) {
   const isSent = message.senderEmail.toLowerCase() === currentEmail;
   const isUnread = !message.isRead && !isSent;
@@ -115,6 +118,13 @@ export default function MessageCard({
 
         <div className="flex items-center gap-3 min-w-0">
           {isUnread && <div className="w-2.5 h-2.5 rounded-full bg-heart shrink-0"></div>}
+          <div className="w-9 h-9 rounded-full bg-gray-700 border border-gray-600 overflow-hidden shrink-0 flex items-center justify-center text-gray-200 text-sm font-semibold uppercase">
+            {avatarUrl ? (
+              <img src={avatarUrl} alt="" draggable={false} className="w-full h-full object-cover" />
+            ) : (
+              initial || '?'
+            )}
+          </div>
           <p style={glow} className="font-sans text-[15px] leading-snug break-words min-w-0">
             {isSent ? (
               <>
@@ -129,7 +139,11 @@ export default function MessageCard({
             )}
           </p>
         </div>
-        <span style={glow} className="font-sans text-xs text-gray-300 shrink-0">{date}</span>
+        <span style={glow} className="font-sans text-xs text-gray-300 shrink-0 flex items-center gap-2">
+          {message.attachments?.length > 0 && <Paperclip size={13} aria-label="Has photos" />}
+          {isStarred && <Star size={13} className="fill-amber-400 text-amber-400" aria-label="Keepsake" />}
+          {date}
+        </span>
       </div>
     </div>
   );
