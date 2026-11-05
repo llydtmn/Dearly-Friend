@@ -6,6 +6,7 @@ import {
   getProfiles,
   markAsRead,
   deleteMessage,
+  deleteMessageForEveryone,
   subscribeToMessages,
   getKeepsakeIds,
   getUnreadCount,
@@ -333,15 +334,20 @@ export default function Home({ user, onSignOut }) {
     setIsEnvelopeOpen(false);
   };
 
-  const handleDelete = async (id) => {
+  // scope: 'me' hides my copy only; 'everyone' removes the letter for both people (sender only)
+  const handleDelete = async (msg, scope = 'me') => {
     try {
-      await deleteMessage(id);
-      setMessages((prev) => prev.filter((m) => m.id !== id));
+      if (scope === 'everyone') await deleteMessageForEveryone(msg);
+      else await deleteMessage(msg.id);
+      setMessages((prev) => prev.filter((m) => m.id !== msg.id));
+      setActiveMessage((cur) => (cur?.id === msg.id ? null : cur));
       setSwipedId(null);
       refreshUnread();
+      if (scope === 'everyone') toast.success('Letter deleted for everyone.');
     } catch (err) {
       console.error('Failed to delete message:', err);
       toast.error("Couldn't delete this letter. Please try again.");
+      throw err;
     }
   };
 
@@ -543,7 +549,7 @@ export default function Home({ user, onSignOut }) {
                   isOpen={swipedId === msg.id}
                   onOpen={() => setSwipedId(msg.id)}
                   onClose={() => setSwipedId((cur) => (cur === msg.id ? null : cur))}
-                  onDelete={() => handleDelete(msg.id)}
+                  onDelete={(scope) => handleDelete(msg, scope)}
                 />
               );
             })}

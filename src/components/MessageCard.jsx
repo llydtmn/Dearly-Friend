@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Trash2, Star, Paperclip, Mic } from 'lucide-react';
 
 const ACTION_WIDTH = 88;
@@ -24,6 +25,7 @@ export default function MessageCard({
   const moved = useRef(false);
   const [drag, setDrag] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [choosing, setChoosing] = useState(false);
 
   const offset = drag ?? (isOpen ? -ACTION_WIDTH : 0);
 
@@ -71,15 +73,25 @@ export default function MessageCard({
     onClick?.();
   };
 
-  const handleDelete = async (e) => {
-    e.stopPropagation();
+  const runDelete = async (scope) => {
     if (deleting) return;
     setDeleting(true);
     try {
-      await onDelete?.();
+      await onDelete?.(scope);
+    } catch {
+      /* the parent already shows an error toast */
     } finally {
       setDeleting(false);
+      setChoosing(false);
     }
+  };
+
+  // Letters I sent can be removed for both people, so ask which one. Received letters only hide my copy.
+  const handleDelete = (e) => {
+    e.stopPropagation();
+    if (deleting) return;
+    if (isSent) setChoosing(true);
+    else runDelete('me');
   };
 
   const strong = isUnread ? 'text-white font-semibold' : 'text-gray-50 font-medium';
@@ -146,6 +158,57 @@ export default function MessageCard({
           {date}
         </span>
       </div>
+
+      {choosing &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-choice-title"
+            onClick={() => !deleting && setChoosing(false)}
+          >
+            <div
+              className="w-full max-w-sm rounded-lg bg-gray-800 border border-gray-600 p-5 space-y-3"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 id="delete-choice-title" className="font-handwriting text-2xl text-white">
+                Delete this letter?
+              </h3>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => runDelete('me')}
+                className="w-full text-left rounded-md border border-gray-600 px-4 py-3 text-gray-100 hover:bg-white/5 disabled:opacity-60"
+              >
+                <span className="block font-medium">Delete for me</span>
+                <span className="block text-xs text-gray-400">
+                  Only hides your copy. {message.recipientEmail} keeps theirs. You can restore it later.
+                </span>
+              </button>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => runDelete('everyone')}
+                className="w-full text-left rounded-md bg-red-600 px-4 py-3 text-white hover:bg-red-700 disabled:opacity-60"
+              >
+                <span className="block font-medium">{deleting ? 'Deleting...' : 'Delete for everyone'}</span>
+                <span className="block text-xs text-red-100">
+                  Removes it for you and {message.recipientEmail}, along with any photos or voice note. This can&apos;t be undone.
+                </span>
+              </button>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => setChoosing(false)}
+                className="w-full py-2 text-sm text-gray-300 hover:text-white"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }

@@ -118,6 +118,15 @@ export const deleteMessage = async (id) => {
   if (error) throw error;
 };
 
+// Removes the letter for BOTH people. Only the sender may do this (the database enforces it).
+// Attached photos and the voice note are cleaned up afterwards (best effort).
+export const deleteMessageForEveryone = async (msg) => {
+  const { error } = await supabase.rpc('delete_message_for_everyone', { p_id: msg.id });
+  if (error) throw error;
+  await removeAttachments(msg.attachments);
+  await removeVoice(msg.voicePath);
+};
+
 /* ---------- Deleted letters (my removed copies, which I can bring back) ---------- */
 
 export const getDeletedMessages = async (myEmail, limit = 100) => {
